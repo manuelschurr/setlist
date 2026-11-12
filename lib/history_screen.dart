@@ -30,7 +30,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   final List<Workout> _days = [];
   bool _reachedEnd = false;
 
-  /// An import, export or restore is running. The data menu is off until it ends.
+  /// An import, export or restore is running. The data menu, the day rows and Back are off until it ends, so the home reloads only after an import has committed.
   bool _busy = false;
 
   @override
@@ -157,54 +157,58 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('History'),
-        actions: [
-          PopupMenuButton<_DataAction>(
-            enabled: !_busy,
-            tooltip: 'Data',
-            onSelected: (action) => switch (action) {
-              _DataAction.import => _import(),
-              _DataAction.export => _export(),
-              _DataAction.restore => _restore(),
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: _DataAction.import, child: Text('Import FitNotes backup')),
-              PopupMenuItem(value: _DataAction.export, child: Text('Export Setlist backup')),
-              PopupMenuItem(value: _DataAction.restore, child: Text('Restore Setlist backup')),
-            ],
-          ),
-        ],
-        bottom: _busy ? const PreferredSize(preferredSize: Size.fromHeight(4), child: LinearProgressIndicator()) : null,
-      ),
-      body: _days.isEmpty && _reachedEnd
-          ? const Center(child: Text('No workouts yet'))
-          : ListView.builder(
-              itemCount: _days.length + (_reachedEnd ? 0 : 1),
-              itemBuilder: (context, i) {
-                if (i == _days.length) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) _loadMore();
-                  });
-                  return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()));
-                }
-                final w = _days[i];
-                final sets = w.summary.doneSets;
-                return ListTile(
-                  title: Text(dayLabel(w.day)),
-                  subtitle: Text(w.slots.isEmpty ? w.note : w.slots.map((s) => s.exercise.name).join(', '), maxLines: 2, overflow: TextOverflow.ellipsis),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(sets == 1 ? '1 set' : '$sets sets'),
-                      if (w.day != widget.home.day && w.slots.isNotEmpty) IconButton(icon: const Icon(Icons.content_copy), tooltip: 'Copy to today', onPressed: () => Navigator.pop(context, w)),
-                    ],
-                  ),
-                  onTap: () => _open(w.day),
-                );
+    return PopScope(
+      canPop: !_busy,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('History'),
+          actions: [
+            PopupMenuButton<_DataAction>(
+              enabled: !_busy,
+              tooltip: 'Data',
+              onSelected: (action) => switch (action) {
+                _DataAction.import => _import(),
+                _DataAction.export => _export(),
+                _DataAction.restore => _restore(),
               },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: _DataAction.import, child: Text('Import FitNotes backup')),
+                PopupMenuItem(value: _DataAction.export, child: Text('Export Setlist backup')),
+                PopupMenuItem(value: _DataAction.restore, child: Text('Restore Setlist backup')),
+              ],
             ),
+          ],
+          bottom: _busy ? const PreferredSize(preferredSize: Size.fromHeight(4), child: LinearProgressIndicator()) : null,
+        ),
+        body: _days.isEmpty && _reachedEnd
+            ? const Center(child: Text('No workouts yet'))
+            : ListView.builder(
+                itemCount: _days.length + (_reachedEnd ? 0 : 1),
+                itemBuilder: (context, i) {
+                  if (i == _days.length) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) _loadMore();
+                    });
+                    return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()));
+                  }
+                  final w = _days[i];
+                  final sets = w.summary.doneSets;
+                  return ListTile(
+                    enabled: !_busy,
+                    title: Text(dayLabel(w.day)),
+                    subtitle: Text(w.slots.isEmpty ? w.note : w.slots.map((s) => s.exercise.name).join(', '), maxLines: 2, overflow: TextOverflow.ellipsis),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(sets == 1 ? '1 set' : '$sets sets'),
+                        if (w.day != widget.home.day && w.slots.isNotEmpty) IconButton(icon: const Icon(Icons.content_copy), tooltip: 'Copy to today', onPressed: _busy ? null : () => Navigator.pop(context, w)),
+                      ],
+                    ),
+                    onTap: () => _open(w.day),
+                  );
+                },
+              ),
+      ),
     );
   }
 }

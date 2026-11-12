@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -50,6 +51,16 @@ final class FakePicker extends FilePickerPlatform {
 
   final PlatformFile file;
 
+  /// Answers [saveFile] once the test completes it, so an export stays running until then.
+  final saving = Completer<Uri?>();
+  bool saveAsked = false;
+
+  @override
+  Future<Uri?> saveFile({required String fileName, required Uint8List bytes, required String mimeType, String? dialogTitle, String? initialDirectory, Function(FilePickerStatus)? onFileSaving, WindowsOptions windowsOptions = const WindowsOptions(), LinuxOptions linuxOptions = const LinuxOptions(), WebOptions webOptions = const WebOptions()}) {
+    saveAsked = true;
+    return saving.future;
+  }
+
   @override
   Future<PlatformFile?> pickFile({String? dialogTitle, String? initialDirectory, FileType type = FileType.any, List<String>? allowedExtensions, Function(FilePickerStatus)? onFileLoading, int compressionQuality = 0, AndroidOptions androidOptions = const AndroidOptions(), DarwinOptions darwinOptions = const DarwinOptions(), WindowsOptions windowsOptions = const WindowsOptions(), LinuxOptions linuxOptions = const LinuxOptions(), WebOptions webOptions = const WebOptions()}) async => file;
 }
@@ -82,5 +93,47 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('No workouts yet'), findsNothing);
     expect(find.textContaining('Squat'), findsWidgets);
+  });
+
+  testWidgets('Back and the day rows do nothing while an export runs, and work again once it ends', (tester) async {
+    final dir = Directory.systemTemp.createTempSync('setlist_busy_');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final picker = FakePicker(ContentUriFile(Uint8List(0)));
+    FilePickerPlatform.instance = picker;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('plugins.flutter.io/path_provider'), (_) async => dir.path);
+    final store = Store.open('${dir.path}/setlist.sqlite');
+    addTearDown(store.close);
+    final today = Day.of(DateTime.now());
+    store.saveDay(Workout(day: today, note: 'today'));
+    final home = Home(day: today, alarm: FakeAlarm(), restore: (_) {});
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (context) => TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => HistoryScreen(store: store, home: home))), child: const Text('Open history'))),
+    ));
+    await tester.tap(find.text('Open history'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Data'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Export Setlist backup'));
+    for (var i = 0; i < 200 && !picker.saveAsked; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+    expect(picker.saveAsked, isTrue);
+    await tester.pageBack();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byType(HistoryScreen), findsOneWidget);
+    await tester.tap(find.text('Today'));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byType(HistoryScreen), findsOneWidget);
+
+    picker.saving.complete(null);
+    for (var i = 0; i < 200 && find.byType(LinearProgressIndicator).evaluate().isNotEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(HistoryScreen), findsNothing);
   });
 }
