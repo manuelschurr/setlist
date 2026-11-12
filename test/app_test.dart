@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:flutter/widgets.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:setlist/day.dart';
 import 'package:setlist/history_screen.dart';
@@ -42,5 +44,34 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('not a Setlist backup'), findsOneWidget);
     expect(find.text('100 kg × 5'), findsOneWidget);
+  });
+
+  testWidgets('a resume on a later day moves the home to today, unless a set was logged in the last 3 hours', (tester) async {
+    final dir = Directory.systemTemp.createTempSync('setlist_app_');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final evening = Day.parse('2026-03-10');
+    final seed = Store.open('${dir.path}/setlist.sqlite');
+    final squat = seed.createExercise(name: 'Squat', kind: ExerciseKind.weightReps);
+    seed.saveDay(Workout(day: evening, slots: [Slot(squat, [SetEntry(grams: 100000, reps: 5, status: Done(DateTime(2026, 3, 10, 23, 30))), const SetEntry(grams: 100000, reps: 5)])]));
+    seed.close();
+    var now = DateTime(2026, 3, 10, 23, 40);
+    Future<void> resumeAt(DateTime time) async {
+      now = time;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+    }
+
+    await tester.pumpWidget(SetlistApp(dbPath: '${dir.path}/setlist.sqlite', alarm: FakeAlarm(), clock: () => now));
+    expect(tester.widget<WorkoutScreen>(find.byType(WorkoutScreen)).day, evening);
+
+    await resumeAt(DateTime(2026, 3, 11, 0, 45));
+    expect(tester.widget<WorkoutScreen>(find.byType(WorkoutScreen)).day, evening);
+    expect(find.text('100 kg × 5'), findsNWidgets(2));
+
+    await resumeAt(DateTime(2026, 3, 11, 7));
+    expect(tester.widget<WorkoutScreen>(find.byType(WorkoutScreen)).day, Day.parse('2026-03-11'));
+    expect(find.text('100 kg × 5'), findsNothing);
+    expect(find.text('Add exercise'), findsOneWidget);
   });
 }

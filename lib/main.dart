@@ -12,23 +12,40 @@ Future<void> main() async {
   runApp(SetlistApp(dbPath: '${dir.path}/setlist.sqlite', alarm: AndroidRestAlarm()));
 }
 
-/// Opens the one database file and shows today. The store and the [Home] are passed down by constructor; there is no other shared state, because each screen loads what it shows from the store. Restoring a backup is the one thing that replaces the store, so this widget owns it and rebuilds the whole app around the new one.
+/// Opens the one database file and shows today. The store and the [Home] are passed down by constructor; there is no other shared state, because each screen loads what it shows from the store. Restoring a backup is the one thing that replaces the store, so this widget owns it and rebuilds the whole app around the new one. It also starts over on a new home when the app resumes on a later day.
 class SetlistApp extends StatefulWidget {
-  const SetlistApp({super.key, required this.dbPath, required this.alarm});
+  const SetlistApp({super.key, required this.dbPath, required this.alarm, this.clock = DateTime.now});
 
   final String dbPath;
   final RestAlarm alarm;
+
+  /// Decides which day the home shows.
+  final DateTime Function() clock;
 
   @override
   State<SetlistApp> createState() => _SetlistAppState();
 }
 
-class _SetlistAppState extends State<SetlistApp> {
+class _SetlistAppState extends State<SetlistApp> with WidgetsBindingObserver {
   late Store _store = Store.open(widget.dbPath);
   late Home _home = _newHome();
   final _messenger = GlobalKey<ScaffoldMessengerState>();
 
-  Home _newHome() => Home(day: Day.of(DateTime.now()), alarm: widget.alarm, restore: _restore);
+  Home _newHome() => Home(day: Day.of(widget.clock()), alarm: widget.alarm, restore: _restore);
+
+  /// A process that lives through the night would otherwise show yesterday and log onto it. A set logged within the last 3 hours means a session that crossed midnight, which stays on its day.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    final now = widget.clock();
+    if (Day.of(now) == _home.day) return;
+    final recent = [
+      for (final slot in _store.loadDay(_home.day).slots)
+        for (final set in slot.sets)
+          if (set.status case Done(:final at?) when now.difference(at) < const Duration(hours: 3)) set,
+    ];
+    if (recent.isEmpty) setState(() => _home = _newHome());
+  }
 
   /// Every screen holds the old store, so after the swap the app starts over from a new home on today, with a new navigator.
   void _restore(String backupPath) {
@@ -47,7 +64,14 @@ class _SetlistAppState extends State<SetlistApp> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _store.close();
     super.dispose();
   }

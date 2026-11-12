@@ -18,7 +18,7 @@ extension type const Day._(String iso) implements Object {
     throw FormatException('not a calendar day in the form YYYY-MM-DD', text);
   }
 
-  /// The local calendar day of [time]. A session that runs past midnight stays on the day its screen opened, because the screen holds its [Day] and never asks the clock again.
+  /// The local calendar day of [time]. A session that runs past midnight stays on the day its screen opened, because the screen holds its [Day] and never asks the clock again. The app moves the home to a new day on resume only when no set was logged in the last 3 hours (see main.dart).
   factory Day.of(DateTime time) {
     final local = time.toLocal();
     return Day._('${local.year.toString().padLeft(4, '0')}-${_twoDigits(local.month)}-${_twoDigits(local.day)}');
