@@ -160,6 +160,44 @@ final class Store {
   /// Writes a consistent copy of the whole database to [destination] with `VACUUM INTO`, replacing any file already there. The importer calls it before writing, and the export action shares the same file.
   void copyTo(String destination) => _vacuumInto(_db, destination);
 
+  /// Restores a copy made by [copyTo]: moves [backupPath] over the database at [dbPath]. Close every store on [dbPath] first and open a new one after, which migrates an older copy. Throws [NotASetlistBackup] and changes nothing when [backupPath] is not a Setlist database this build can open. Otherwise copies the current database to `<dbPath>.before-restore-<unix ms>` and removes its `-wal` and `-shm` files, because SQLite would replay a leftover log onto the restored file.
+  static void replaceWith(String backupPath, {required String dbPath}) {
+    _checkSetlistFile(backupPath);
+    if (File(dbPath).existsSync()) {
+      final current = sqlite3.open(dbPath);
+      try {
+        _vacuumInto(current, '$dbPath.before-restore-${DateTime.now().millisecondsSinceEpoch}');
+      } finally {
+        current.close();
+      }
+    }
+    for (final leftover in [File('$dbPath-wal'), File('$dbPath-shm')]) {
+      if (leftover.existsSync()) leftover.deleteSync();
+    }
+    File(backupPath).renameSync(dbPath);
+  }
+
+  static void _checkSetlistFile(String path) {
+    const notSetlist = 'This file is not a Setlist backup. Pick a backup that Setlist exported.';
+    final Database db;
+    try {
+      db = sqlite3.open(path, mode: OpenMode.readOnly);
+    } on SqliteException {
+      throw const NotASetlistBackup(notSetlist);
+    }
+    try {
+      final version = db.userVersion;
+      final tables = {for (final row in db.select("SELECT name FROM sqlite_master WHERE type = 'table'")) row['name'] as String};
+      if (version == 0 || !tables.containsAll(_setlistTables)) throw const NotASetlistBackup(notSetlist);
+      if (version > _migrations.length) throw const NotASetlistBackup('This backup was made by a newer version of Setlist. Update the app, then restore it.');
+      if (db.select('PRAGMA quick_check').first.values.first != 'ok') throw const NotASetlistBackup('This Setlist backup is damaged and cannot be restored.');
+    } on SqliteException {
+      throw const NotASetlistBackup(notSetlist);
+    } finally {
+      db.close();
+    }
+  }
+
   void close() {
     for (final statement in _statements.values) {
       statement.close();
@@ -207,6 +245,9 @@ final class Store {
     }
   }
 }
+
+/// Tables every Setlist database has had since v1. A migration that drops one removes it here.
+const _setlistTables = {'exercise', 'workout', 'workout_slot', 'workout_set', 'app_day', 'setting'};
 
 const _weightStepKey = 'default_weight_step_g';
 const _restKey = 'default_rest_s';
@@ -429,6 +470,15 @@ final class DuplicateExerciseName implements Exception {
 
   @override
   String toString() => 'DuplicateExerciseName: $name';
+}
+
+/// The file picked for a restore is not a Setlist database this build can open. [message] is shown to the lifter as is.
+final class NotASetlistBackup implements Exception {
+  const NotASetlistBackup(this.message);
+  final String message;
+
+  @override
+  String toString() => 'NotASetlistBackup: $message';
 }
 
 final class StoreWriteFailed implements Exception {
