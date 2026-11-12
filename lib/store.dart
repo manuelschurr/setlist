@@ -69,6 +69,18 @@ final class Store {
     return [for (final row in rows) _set(row)];
   }
 
+  /// Every day on which [exercise] has a done set, newest first, at most [limit] days, each with its done sets in set order, notes included. Planned sets never count. Feeds the exercise history screen.
+  List<({Day day, List<SetEntry> sets})> exerciseHistory(ExerciseId exercise, {int limit = 200}) {
+    final rows = _sql('SELECT s.day, $_setColumns FROM workout_set s WHERE s.exercise_id = ?1 AND s.done = 1 AND s.day IN (SELECT DISTINCT day FROM workout_set WHERE exercise_id = ?1 AND done = 1 ORDER BY day DESC LIMIT ?2) ORDER BY s.day DESC, s.set_index').select([exercise.value, limit]);
+    final sessions = <({Day day, List<SetEntry> sets})>[];
+    for (final row in rows) {
+      final day = Day.parse(row['day'] as String);
+      if (sessions.lastOrNull?.day != day) sessions.add((day: day, sets: []));
+      sessions.last.sets.add(_set(row));
+    }
+    return sessions;
+  }
+
   /// Saved days before [before] (all days when null), newest first, at most [limit]. Feeds the history list and the empty day's "Copy" list, which therefore show the same thing. Page by passing the last day of the previous page.
   List<Workout> recentWorkouts({Day? before, int limit = 30}) => _assemble(_sql('$_selectDays WHERE w.day IN (SELECT day FROM workout WHERE ?1 IS NULL OR day < ?1 ORDER BY day DESC LIMIT ?2) ORDER BY w.day DESC, sl.position, s.set_index').select([before?.iso, limit]));
 
