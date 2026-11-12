@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:setlist/day.dart';
+import 'package:setlist/drive_backup.dart';
 import 'package:setlist/main.dart';
 import 'package:setlist/rest_alarm.dart';
 import 'package:setlist/store.dart';
@@ -73,7 +74,7 @@ void main() {
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: setlistTheme(Brightness.light),
-        home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}), day: today),
+        home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today),
       ),
     ));
     await shot(tester, '01-empty-day');
@@ -97,7 +98,7 @@ void main() {
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: setlistTheme(Brightness.dark),
-        home: WorkoutScreen(store: store, home: Home(day: dark.day, alarm: _SilentAlarm(), restore: (_) {}), day: dark.day),
+        home: WorkoutScreen(store: store, home: Home(day: dark.day, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: dark.day),
       ),
     ));
     await shot(tester, '05-dark');

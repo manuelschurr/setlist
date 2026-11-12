@@ -4,11 +4,14 @@ import 'package:flutter/widgets.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:setlist/day.dart';
+import 'package:setlist/drive_backup.dart';
 import 'package:setlist/history_screen.dart';
 import 'package:setlist/main.dart';
 import 'package:setlist/rest_alarm.dart';
 import 'package:setlist/store.dart';
 import 'package:setlist/workout_screen.dart';
+
+import 'drive_backup_test.dart' show FakeProvider, nextMillisecond;
 
 final class FakeAlarm implements RestAlarm {
   @override
@@ -73,5 +76,41 @@ void main() {
     expect(tester.widget<WorkoutScreen>(find.byType(WorkoutScreen)).day, Day.parse('2026-03-11'));
     expect(find.text('100 kg × 5'), findsNothing);
     expect(find.text('Add exercise'), findsOneWidget);
+  });
+
+  testWidgets('leaving the app backs up a changed database to the linked file, and an unchanged one not again', (tester) async {
+    final dir = Directory.systemTemp.createTempSync('setlist_app_');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final provider = FakeProvider();
+    addTearDown(provider.dispose);
+    final path = '${dir.path}/setlist.sqlite';
+    final today = Day.of(DateTime.now());
+    final seed = Store.open(path);
+    final squat = seed.createExercise(name: 'Squat', kind: ExerciseKind.weightReps);
+    seed.saveDay(Workout(day: today, slots: [Slot(squat, const [SetEntry(grams: 100000, reps: 5)])]));
+    nextMillisecond();
+    await DriveBackup(dbPath: path, store: () => seed).linkNewFile();
+    seed.close();
+    final uri = provider.writtenTo.single;
+    nextMillisecond();
+
+    await tester.pumpWidget(SetlistApp(dbPath: path, alarm: FakeAlarm()));
+    Future<void> leaveAndReturn() async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+    }
+
+    await tester.tap(find.byTooltip('Log set 1'));
+    await tester.pumpAndSettle();
+    nextMillisecond();
+    await leaveAndReturn();
+    expect(provider.writtenTo, [uri, uri]);
+    expect(provider.setsIn(uri, today).single.isDone, isTrue);
+
+    nextMillisecond();
+    await leaveAndReturn();
+    expect(provider.writtenTo, [uri, uri]);
   });
 }

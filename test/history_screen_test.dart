@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:setlist/day.dart';
+import 'package:setlist/drive_backup.dart';
 import 'package:setlist/history_screen.dart';
 import 'package:setlist/rest_alarm.dart';
 import 'package:setlist/store.dart';
@@ -76,7 +77,7 @@ void main() {
     final store = Store.open('${dir.path}/setlist.sqlite');
     addTearDown(store.close);
     final today = Day.of(DateTime.now());
-    await tester.pumpWidget(MaterialApp(home: HistoryScreen(store: store, home: Home(day: today, alarm: FakeAlarm(), restore: (_) {}))));
+    await tester.pumpWidget(MaterialApp(home: HistoryScreen(store: store, home: Home(day: today, alarm: FakeAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: store.path!, store: () => store)))));
     expect(find.text('No workouts yet'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Data'));
@@ -105,7 +106,7 @@ void main() {
     addTearDown(store.close);
     final today = Day.of(DateTime.now());
     store.saveDay(Workout(day: today, note: 'today'));
-    final home = Home(day: today, alarm: FakeAlarm(), restore: (_) {});
+    final home = Home(day: today, alarm: FakeAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: store.path!, store: () => store));
     await tester.pumpWidget(MaterialApp(
       home: Builder(builder: (context) => TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => HistoryScreen(store: store, home: home))), child: const Text('Open history'))),
     ));
