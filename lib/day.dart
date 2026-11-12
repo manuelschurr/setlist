@@ -277,9 +277,9 @@ final class Workout {
 
   /// The rest countdown at [now], derived from the log times, never stored. Undo, app restarts and edits during rest therefore need no timer state.
   ///
-  /// It runs from the latest log time plus that set's exercise rest, and is null once it has ended, on any day but [now]'s (logging on a past day starts no countdown), and when no planned set remains (the panel shows the summary instead).
+  /// It runs from the latest log time plus that set's exercise rest, whatever the calendar day of [now], so a rest that spans midnight keeps counting. It is null once it has ended and when no planned set remains (the panel shows the summary instead).
   Rest? restAt(DateTime now) {
-    if (Day.of(now) != day || _firstPlanned(this) == null) return null;
+    if (_firstPlanned(this) == null) return null;
     ({DateTime at, Exercise exercise})? latest;
     for (final slot in slots) {
       for (final set in slot.sets) {
