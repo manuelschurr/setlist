@@ -103,6 +103,19 @@ void main() {
       expect(store.lastSession(squat.id, before: d1), isEmpty);
     });
 
+    test('exercise history lists the days with done sets newest first, each with only its done sets', () {
+      final bench = store.createExercise(name: 'Bench', kind: ExerciseKind.weightReps);
+      store.saveDay(Workout(day: d1, slots: [Slot(bench, [done(80000, 5)]), Slot(squat, [done(100000, 5, note: 'grindy'), const SetEntry(grams: 100000, reps: 5), done(100000, 4)])]));
+      store.saveDay(Workout(day: d2, slots: [Slot(squat, [const SetEntry(grams: 102500, reps: 5)])]));
+      store.saveDay(Workout(day: d3, slots: [Slot(squat, [done(105000, 5), done(105000, 3)])]));
+      final history = store.exerciseHistory(squat.id);
+      expect([for (final s in history) s.day], [d3, d1]);
+      expect(history.first.sets, [done(105000, 5), done(105000, 3)]);
+      expect(history.last.sets, [done(100000, 5, note: 'grindy'), done(100000, 4)]);
+      expect([for (final s in store.exerciseHistory(squat.id, limit: 1)) s.day], [d3]);
+      expect(store.exerciseHistory(store.createExercise(name: 'Curl', kind: ExerciseKind.weightReps).id), isEmpty);
+    });
+
     test('recent workouts page newest first', () {
       final days = [for (final d in ['01', '02', '03', '04', '05']) Day.parse('2026-10-$d')];
       for (final day in days) {
