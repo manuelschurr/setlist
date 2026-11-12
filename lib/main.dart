@@ -12,14 +12,12 @@ Future<void> main() async {
   runApp(SetlistApp(dbPath: '${dir.path}/setlist.sqlite', alarm: AndroidRestAlarm()));
 }
 
-/// Opens the one database file and shows today. The store and the [Home] are passed down by constructor; there is no other shared state, because each screen loads what it shows from the store. Restoring a backup is the one thing that replaces the store, so this widget owns it and rebuilds the whole app around the new one. It also starts over on a new home when the app resumes on a later day.
 class SetlistApp extends StatefulWidget {
   const SetlistApp({super.key, required this.dbPath, required this.alarm, this.clock = DateTime.now});
 
   final String dbPath;
   final RestAlarm alarm;
 
-  /// Decides which day the home shows.
   final DateTime Function() clock;
 
   @override

@@ -1,5 +1,3 @@
-/// Reads a FitNotes backup into an [ImportBatch] and runs the import off the UI isolate.
-///
 /// This file knows FitNotes' tables and conventions (docs/research.md, Q1) and nothing about Setlist's schema, which stays behind [Store.importBatch]. The only thing it hands over is domain values.
 library;
 
@@ -145,7 +143,6 @@ Future<ImportOutcome> importFitNotes({required String backupPath, required Strin
 
 const _notABackup = "This file is not a FitNotes backup. Make a backup in FitNotes' settings, then pick its .fitnotes file. A Google Drive automatic backup arrives as a .zip file: unzip it first and pick the .fitnotes file inside.";
 
-/// FitNotes kilograms, stored as a real number, to whole grams.
 int? _grams(Object? kilograms) => kilograms == null ? null : ((kilograms as num) * 1000).round();
 
 /// FitNotes stores "use the global setting" as NULL or 0.

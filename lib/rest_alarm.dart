@@ -5,13 +5,11 @@ import 'package:flutter/services.dart';
 
 import 'day.dart';
 
-/// Keeps the system's countdown equal to the rest the workout implies. The screen does not track timer transitions; it calls [show] with [Workout.restAt] after every change and on resume.
 abstract interface class RestAlarm {
   /// Makes the notification and the alarm match [rest]. It posts or moves them when [rest] is set and cancels both when null. It is idempotent. A call with the same value as the last one does nothing, so calling it after every stepper tap costs nothing, and an undo that removes the log cancels the alarm with no special case.
   void show(Rest? rest);
 }
 
-/// Talks to MainActivity over a method channel. The Kotlin side (RestAlarm.kt) posts a notification with a count-down chronometer whose `when` is [Rest.endsAt], and sets AlarmManager.setExactAndAllowWhileIdle so a receiver vibrates and posts "Rest over" at that time.
 final class AndroidRestAlarm implements RestAlarm {
   static const _channel = MethodChannel('de.schurr.setlist/rest');
 

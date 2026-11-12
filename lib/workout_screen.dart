@@ -1,5 +1,3 @@
-/// The workout screen, with the day's list above and the docked panel below.
-///
 /// [_WorkoutScreenState] is the only owner of the live day. It holds one [DayState] and changes it only in [_WorkoutScreenState._dispatch], which runs [reduce], saves the whole day when it changed, offers undo, and syncs the rest alarm. Every widget below it is stateless apart from the countdown text and dialogs, and receives the state and a `ValueChanged<Command>`.
 library;
 
@@ -44,16 +42,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
   /// The root messenger, kept so [dispose] can reach it after this screen's context is gone. The snackbar it shows outlives the screen and would follow the lifter to the home.
   late ScaffoldMessengerState _messenger;
 
-  /// The Undo snackbar this screen showed, until it closes.
   ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _undoBar;
 
-  /// The last save threw. The next change, the app going to the background, or the banner's Retry saves the whole day again, which converges because the save is a replace.
   bool _unsaved = false;
 
-  /// Cards whose header the lifter tapped, with the collapsed state chosen. A card with no entry is collapsed exactly when it is finished and the focus is elsewhere. Logging a card to finished, or moving the focus into it, drops its entry.
   final Map<ExerciseId, bool> _collapsedByHand = {};
 
-  /// Previous-session lookups, one per exercise until the next reload. Serve both the muted "last time" text and the plan for [AddExercise].
   final Map<ExerciseId, List<SetEntry>> _lastTime = {};
 
   final Map<ExerciseId, GlobalKey> _cardKeys = {};
@@ -152,7 +146,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
     FocusSet() || SetField() || SetWarmup() || SetSetNote() || UnlogSet() || AddSet() || AddExercise() || MoveExercise() || SetNote() || UpdateExercise() => null,
   };
 
-  /// Pushes [screen] and reloads when it returns, whatever it did to the store.
   Future<T?> _push<T>(Widget screen) async {
     final result = await Navigator.push<T>(context, MaterialPageRoute(builder: (_) => screen));
     if (mounted) _reload();
@@ -186,7 +179,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
     if (picked != null && mounted) _openDay(Day.of(picked));
   }
 
-  /// Shows [day]. The home pushes it and reloads when it returns. A pushed screen hands the day back to the screen that opened it, so every day screen returns to the screen that awaits it, and picking the home's day always lands on the home.
   Future<void> _openDay(Day day) async {
     if (day == widget.day) return;
     if (!_isHome) {
@@ -230,7 +222,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
     }
   }
 
-  /// Scrolls the card into view after the frame that builds it, unless it is already fully on screen. Every card stays built (see the list's cache extent), so the key always has a context.
   void _reveal(ExerciseId id) => WidgetsBinding.instance.addPostFrameCallback((_) {
     final card = _cardKeys[id]?.currentContext;
     if (card == null || !card.mounted) return;
@@ -350,7 +341,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
 
 enum _CardAction { history, edit, remove }
 
-/// One exercise card. It shows a header with drag handle, name, progress and menu, then one row per set and an "Add set" button, or only the header with a summary line while collapsed.
 class _SlotCard extends StatelessWidget {
   const _SlotCard({super.key, required this.index, required this.slot, required this.focus, required this.lastTime, required this.collapsed, required this.onToggle, required this.onAction, required this.onCommand});
 
@@ -449,7 +439,6 @@ class _SlotCard extends StatelessWidget {
 
 enum _SetOption { warmup, note, delete }
 
-/// The long-press sheet of a set row: warm-up on or off, the note, and delete.
 Future<void> _showSetOptions(BuildContext context, SetRef ref, SetEntry set, ValueChanged<Command> onCommand) async {
   final choice = await showModalBottomSheet<_SetOption>(
     context: context,
@@ -479,7 +468,6 @@ Future<void> _showSetOptions(BuildContext context, SetRef ref, SetEntry set, Val
   }
 }
 
-/// Set number (`W` for a warm-up), the kind's values, last time's values in small muted text, and a check circle. The focused row has a filled highlight. A note shows under the values.
 class _SetRow extends StatelessWidget {
   const _SetRow({required this.label, required this.set, required this.kind, required this.lastTime, required this.focused, required this.onTap, required this.onCheck, required this.onLongPress});
 
@@ -533,7 +521,6 @@ class _SetRow extends StatelessWidget {
   }
 }
 
-/// The docked panel. Edits the focused set: name and set number, the rest countdown after a log, one stepper per field of the kind, and the Log button. Shows the session summary when nothing is focused.
 class _Panel extends StatelessWidget {
   const _Panel({required this.state, required this.onCommand});
 
@@ -608,8 +595,6 @@ class _Panel extends StatelessWidget {
   }
 }
 
-/// A large value with its unit above large minus and plus buttons. Tapping the value opens a number dialog.
-///
 /// [onTyped] fires once, when the dialog is confirmed, never per keystroke. Each call runs the cascade, and typing 10 over a 5 would pass through 1 and capture any later planned set that really held 1.
 class _Stepper extends StatelessWidget {
   const _Stepper({required this.field, required this.value, required this.onStep, required this.onTyped});
@@ -666,7 +651,6 @@ class _Stepper extends StatelessWidget {
   }
 }
 
-/// Types one value. Commits on OK only, and keeps the dialog open with an error while the text does not parse.
 class _ValueDialog extends StatefulWidget {
   const _ValueDialog({required this.field, required this.value});
 
@@ -726,7 +710,6 @@ class _ValueDialogState extends State<_ValueDialog> {
   }
 }
 
-/// Counts down to [Rest.endsAt] once a second and hides itself at zero. Owns the only Dart timer in the app, which drives this text and nothing else; the notification and vibration come from [RestAlarm].
 class _RestCountdown extends StatefulWidget {
   const _RestCountdown({required this.rest});
 
@@ -813,7 +796,6 @@ class _SummaryPanel extends StatelessWidget {
   }
 }
 
-/// A past workout: date, exercise names, and a Copy button.
 class CopyTile extends StatelessWidget {
   const CopyTile({super.key, required this.workout, required this.onCopy});
 
@@ -830,7 +812,6 @@ class CopyTile extends StatelessWidget {
   }
 }
 
-/// Asks for a line or a few lines of text, such as a note. Returns the trimmed text on OK and null on Cancel.
 Future<String?> askText(BuildContext context, {required String title, required String initial}) => showDialog<String>(context: context, builder: (_) => _TextDialog(title: title, initial: initial));
 
 class _TextDialog extends StatefulWidget {
@@ -868,7 +849,6 @@ class _TextDialogState extends State<_TextDialog> {
 const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/// "Today", "Yesterday", or a short date such as "Thu 12 Nov", with the year when it is not this year.
 String dayLabel(Day day) {
   final now = DateTime.now();
   if (day == Day.of(now)) return 'Today';
@@ -885,7 +865,6 @@ String? unitOf(Field field) => switch (field) {
   Field.distance || Field.time => null,
 };
 
-/// A set as a row shows it: `100 kg × 5`, `1:30`, `2.5 km · 12:00`.
 String setText(SetEntry set, ExerciseKind kind) {
   if (kind == ExerciseKind.weightReps) return '${Field.weight.format(set.grams)} kg × ${set.reps}';
   return [
@@ -897,7 +876,6 @@ String setText(SetEntry set, ExerciseKind kind) {
   ].join(' · ');
 }
 
-/// The number column of each row: `W` for a warm-up, else the set's position among the working sets.
 List<String> setLabels(List<SetEntry> sets) {
   var working = 0;
   return [for (final set in sets) set.warmup ? 'W' : '${++working}'];

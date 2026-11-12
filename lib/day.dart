@@ -1,7 +1,3 @@
-/// The day aggregate and every rule that changes it.
-///
-/// A [Workout] is one calendar day, holding a note and an ordered list of [Slot]s, each one exercise with its ordered sets. [reduce] is the only way to change a day, and it is a pure function from [DayState] to [DayState]. The cascade and focus rules are therefore unit-tested without Flutter or SQLite, and undo is keeping the previous value.
-///
 /// This file imports only dart:core, so `flutter test test/day_test.dart` runs it on the VPS with no device.
 library;
 
@@ -18,19 +14,16 @@ extension type const Day._(String iso) implements Object {
     throw FormatException('not a calendar day in the form YYYY-MM-DD', text);
   }
 
-  /// The local calendar day of [time]. A session that runs past midnight stays on the day its screen opened, because the screen holds its [Day] and never asks the clock again. The app moves the home to a new day on resume only when no set was logged in the last 3 hours (see main.dart).
   factory Day.of(DateTime time) {
     final local = time.toLocal();
     return Day._('${local.year.toString().padLeft(4, '0')}-${_twoDigits(local.month)}-${_twoDigits(local.day)}');
   }
 
-  /// Local midnight at the start of this day, for showing its weekday and date.
   DateTime get date => DateTime(int.parse(iso.substring(0, 4)), int.parse(iso.substring(5, 7)), int.parse(iso.substring(8)));
 
   bool isBefore(Day other) => iso.compareTo(other.iso) < 0;
 }
 
-/// The database id of an exercise. Inside a day it is also the identity of the exercise's [Slot], because an exercise appears at most once per day.
 extension type const ExerciseId(int value) implements Object {}
 
 /// Points at one set of a day by its exercise's slot and its position in that slot. It is a natural key, so dragging a card never invalidates it.
@@ -41,7 +34,6 @@ enum Field {
   /// Grams. Negative values are allowed for assisted lifts.
   weight,
 
-  /// Repetitions.
   reps,
 
   /// Metres.
@@ -64,7 +56,6 @@ enum Field {
     time => set.copyWith(seconds: value),
   };
 
-  /// The value one stepper tap moves [value] to. Weight steps by the exercise's own increment, reps by 1, distance by 100 m, time by 5 s. Reps, distance and time stop at zero.
   int stepped(Exercise exercise, int value, {required bool up}) {
     final step = switch (this) {
       weight => exercise.weightStepGrams,
@@ -76,7 +67,6 @@ enum Field {
     return this == weight || next >= 0 ? next : 0;
   }
 
-  /// Display text for a value. Weight is kg with at most two decimals and no trailing zeros (`20.41`, `100`, `102.5`), so a converted 20412 g reads cleanly while storage stays exact. Reps is the count. Distance is `400 m` below a kilometre and `5.2 km` from there. Time is `m:ss`.
   String format(int value) => switch (this) {
     weight => _thousandths(value, decimals: 2),
     reps => '$value',
@@ -84,7 +74,6 @@ enum Field {
     time => '${value ~/ 60}:${_twoDigits(value % 60)}',
   };
 
-  /// Parses what the lifter typed into the base unit, or null when it is not a value for this field. The inverse of [format]: a comma works as the decimal separator, distance takes an optional `m` or `km` (bare numbers are metres), and time takes `m:ss` or plain seconds. Only weight may be negative.
   int? parse(String text) {
     final input = text.trim().replaceAll(',', '.');
     switch (this) {
@@ -123,7 +112,6 @@ enum ExerciseKind {
   final List<Field> fields;
 }
 
-/// Whether a set has been done. Sealed so a planned set cannot carry a log time.
 sealed class SetStatus {
   const SetStatus();
 }
@@ -161,7 +149,6 @@ final class SetEntry {
   final int seconds;
   final bool warmup;
 
-  /// The lifter's note on this one set, shown under its values. Empty when there is none.
   final String note;
   final SetStatus status;
 
@@ -173,7 +160,6 @@ final class SetEntry {
 
   SetEntry copyWith({int? grams, int? reps, int? metres, int? seconds, bool? warmup, String? note, SetStatus? status}) => SetEntry(grams: grams ?? this.grams, reps: reps ?? this.reps, metres: metres ?? this.metres, seconds: seconds ?? this.seconds, warmup: warmup ?? this.warmup, note: note ?? this.note, status: status ?? this.status);
 
-  /// The values the kind shows, such as `100 × 5`. Used for the muted "last time" text and the collapsed card header.
   String describe(ExerciseKind kind) => kind.fields.map((f) => f.format(f.read(this))).join(' × ');
 
   @override
@@ -201,7 +187,6 @@ final class Exercise {
   int get hashCode => Object.hash(id, name, kind, category, weightStepGrams, rest);
 }
 
-/// One exercise in a day with its ordered sets. List position is the set number. Never empty. The constructor throws on an empty list, and removing the last set removes the slot.
 final class Slot {
   Slot(this.exercise, List<SetEntry> sets) : sets = List.unmodifiable(sets) {
     if (sets.isEmpty) throw ArgumentError.value(sets, 'sets', 'a slot has at least one set');
@@ -210,12 +195,10 @@ final class Slot {
   final Exercise exercise;
   final List<SetEntry> sets;
 
-  /// Every set is done. A finished card collapses to its header.
   bool get finished => sets.every((s) => s.isDone);
 
   int get doneCount => sets.where((s) => s.isDone).length;
 
-  /// The best done working set, for the collapsed header and the history list. Compares the kind's fields in order, larger first, and the earlier set wins a tie. Warm-ups never count. Null when no working set is done.
   SetEntry? get topSet {
     SetEntry? best;
     for (final set in sets) {
@@ -231,15 +214,11 @@ final class Slot {
   int get hashCode => Object.hash(exercise, Object.hashAll(sets));
 }
 
-/// The countdown after a logged set, with its exercise and the time it ends.
 typedef Rest = ({Exercise exercise, DateTime endsAt});
 
-/// What the panel shows when no planned set remains. [doneSets] counts warm-ups too. Volume is the sum of grams × reps over done working sets. [elapsed] runs from the first log time to the last, null when no set carries one.
 typedef Summary = ({int doneSets, int volumeGrams, Duration? elapsed});
 
-/// One calendar day of training, the aggregate. List order of [slots] is the order on screen, so reordering is a list move.
 final class Workout {
-  /// Throws [ArgumentError] when two slots hold the same exercise. The store and the importer both build workouts through here, so no path produces a day with a duplicate.
   Workout({required this.day, this.note = '', List<Slot> slots = const []}) : slots = List.unmodifiable(slots) {
     final seen = <ExerciseId>{};
     for (final slot in slots) {
@@ -251,7 +230,6 @@ final class Workout {
   final String note;
   final List<Slot> slots;
 
-  /// The store deletes an empty day instead of saving it.
   bool get isEmpty => slots.isEmpty && note.isEmpty;
 
   int indexOf(ExerciseId exercise) => slots.indexWhere((s) => s.exercise.id == exercise);
@@ -266,7 +244,6 @@ final class Workout {
     return sets == null || ref.index < 0 || ref.index >= sets.length ? null : sets[ref.index];
   }
 
-  /// Every set in workout order, slot by slot and set by set.
   Iterable<SetRef> get refs sync* {
     for (final slot in slots) {
       for (var i = 0; i < slot.sets.length; i++) {
@@ -276,8 +253,6 @@ final class Workout {
   }
 
   /// The rest countdown at [now], derived from the log times, never stored. Undo, app restarts and edits during rest therefore need no timer state.
-  ///
-  /// It runs from the latest log time plus that set's exercise rest, whatever the calendar day of [now], so a rest that spans midnight keeps counting. It is null once it has ended and when no planned set remains (the panel shows the summary instead).
   Rest? restAt(DateTime now) {
     if (_firstPlanned(this) == null) return null;
     ({DateTime at, Exercise exercise})? latest;
@@ -326,11 +301,9 @@ List<SetEntry?> alignLastTime(List<SetEntry> today, List<SetEntry> lastSession) 
   return [for (final set in today) take(set.warmup ? warmups : working)];
 }
 
-/// What the workout screen shows, which is the day and the set the panel edits. Only [DayState.open] and [reduce] build one, and both keep [focus] pointing at a set that exists.
 final class DayState {
   DayState._(this.workout, this.focus) : assert(focus == null || workout.setAt(focus) != null);
 
-  /// Focus goes to the first planned set in workout order, or null when none is planned.
   factory DayState.open(Workout workout) => DayState._(workout, _firstPlanned(workout));
 
   final Workout workout;
@@ -339,18 +312,15 @@ final class DayState {
   final SetRef? focus;
 }
 
-/// Everything the lifter can do to a day. Sealed, so [reduce] and every switch over commands in the UI fail to compile when a command is added and not handled.
 sealed class Command {
   const Command();
 }
 
-/// Tapping a set row. Focus moves to [ref]; the workout does not change.
 final class FocusSet extends Command {
   const FocusSet(this.ref);
   final SetRef ref;
 }
 
-/// A stepper tap or a typed value. Runs the cascade. Focus stays.
 final class SetField extends Command {
   const SetField(this.ref, this.field, this.value);
   final SetRef ref;
@@ -364,39 +334,33 @@ final class SetWarmup extends Command {
   final bool warmup;
 }
 
-/// The note on one set. It never cascades.
 final class SetSetNote extends Command {
   const SetSetNote(this.ref, this.note);
   final SetRef ref;
   final String note;
 }
 
-/// The panel's Log button, or a row's check circle. [at] comes from the caller so [reduce] stays pure.
 final class LogSet extends Command {
   const LogSet(this.ref, {required this.at});
   final SetRef ref;
   final DateTime at;
 }
 
-/// A row's check circle on a done set. The set becomes planned, keeps its values and note, and takes the focus.
 final class UnlogSet extends Command {
   const UnlogSet(this.ref);
   final SetRef ref;
 }
 
-/// Appends a planned copy of the exercise's last set and focuses it.
 final class AddSet extends Command {
   const AddSet(this.exercise);
   final ExerciseId exercise;
 }
 
-/// Removes a set. Removing the only set of a slot removes the exercise.
 final class RemoveSet extends Command {
   const RemoveSet(this.ref);
   final SetRef ref;
 }
 
-/// Adds an exercise from the picker. [lastSession] is what the store's previous-session lookup returned, so [reduce] needs no database.
 final class AddExercise extends Command {
   const AddExercise(this.exercise, {required this.lastSession});
   final Exercise exercise;
@@ -408,33 +372,28 @@ final class RemoveExercise extends Command {
   final ExerciseId exercise;
 }
 
-/// Dragging a card. [to] is the index the card ends up at, counted after it is removed from [from]. The screen converts Flutter's reorder index to this.
+/// Dragging a card. [to] is the index the card ends up at, counted after it is removed from [from].
 final class MoveExercise extends Command {
   const MoveExercise(this.from, this.to);
   final int from;
   final int to;
 }
 
-/// Appends each exercise of [source] that this day does not have yet, with all its sets copied as planned.
 final class CopyDay extends Command {
   const CopyDay(this.source);
   final Workout source;
 }
 
-/// The note on the whole day.
 final class SetNote extends Command {
   const SetNote(this.note);
   final String note;
 }
 
-/// Refreshes a slot's copy of an exercise after the lifter edits its name, increment or rest.
 final class UpdateExercise extends Command {
   const UpdateExercise(this.exercise);
   final Exercise exercise;
 }
 
-/// Applies [command] to [state]. It is pure, so the same inputs always give the same output.
-///
 /// Returns the identical [Workout] instance whenever the command does not change the day (a focus tap, a value set to what it already was, adding an exercise the day already has). The screen relies on that to skip the save and keep the undo offer. A command that names a set or an exercise the day does not hold, such as one from an undo snapshot or a stale callback, returns [state] itself.
 DayState reduce(DayState state, Command command) {
   final w = state.workout;
@@ -456,7 +415,6 @@ DayState reduce(DayState state, Command command) {
   };
 }
 
-/// [state] itself when neither the workout instance nor the focus changed, so a no-op command hands back exactly what it got.
 DayState _next(DayState state, Workout workout, SetRef? focus) => identical(workout, state.workout) && focus == state.focus ? state : DayState._(workout, focus);
 
 /// The cascade. Sets [field] of the set at [ref] to [value], and sets [value] on every later set of the same exercise that is still planned and whose [field] held the edited set's old value. Done sets never change by cascade. Sets with another value are left alone, so warm-ups and back-off sets survive an edit to the working sets. The edited set itself may be done, so correcting a logged set still updates the planned ones after it. Returns [w] itself when nothing changes.
@@ -475,8 +433,6 @@ Workout _cascade(Workout w, SetRef ref, Field field, int value) {
   return _withSlot(w, i, Slot(w.slots[i].exercise, next));
 }
 
-/// Marks the set at [ref] done at [at], then moves focus.
-///
 /// Focus moves only when the logged set held the focus, or when the focus was on no planned set. It then goes to the next planned set after [ref] in the same exercise, else to the first planned set of that exercise (one skipped within it), else to the first planned set from the top of the workout (an exercise skipped for a busy rack comes back next), else to null and the panel shows the summary. Checking the circle on some other row leaves the panel where it is. Logging a set that is already done keeps its original time and still moves focus; that is the panel's "Next set" button on a corrected set.
 DayState _log(DayState state, SetRef ref, DateTime at) {
   final w = state.workout;
@@ -488,7 +444,6 @@ DayState _log(DayState state, SetRef ref, DateTime at) {
   return _next(state, logged, advance ? _plannedFrom(logged, ref.exercise, ref.index + 1) : current);
 }
 
-/// Appends [exercise] with planned copies of [lastSession] (one empty set when it was never done) and focuses its first set. When the day already has the exercise, the workout stays identical and focus moves to that slot's first planned set, or its first set when all are done, so the screen scrolls there.
 DayState _addExercise(DayState state, Exercise exercise, List<SetEntry> lastSession) {
   final w = state.workout;
   final existing = w.slotOf(exercise.id);
@@ -500,7 +455,6 @@ DayState _addExercise(DayState state, Exercise exercise, List<SetEntry> lastSess
   return DayState._(Workout(day: w.day, note: w.note, slots: [...w.slots, Slot(exercise, sets)]), (exercise: exercise.id, index: 0));
 }
 
-/// Appends each slot of [source] whose exercise this day lacks, with every set as [SetEntry.asPlan]. The note is not copied. Focus stays unless it was null, then goes to the first planned set.
 DayState _copyDay(DayState state, Workout source) {
   final w = state.workout;
   final added = [
@@ -512,7 +466,6 @@ DayState _copyDay(DayState state, Workout source) {
   return DayState._(next, state.focus ?? _firstPlanned(next));
 }
 
-/// Removes the set at [ref]; the only set of a slot removes the slot. When the removed set held the focus, focus goes to the planned set now at that position or after it in the same exercise, else the first planned set of that exercise, else the first planned set from the top. A focus later in the same slot shifts down by one.
 DayState _removeSet(DayState state, SetRef ref) {
   final w = state.workout;
   if (w.setAt(ref) == null) return state;
@@ -526,7 +479,6 @@ DayState _removeSet(DayState state, SetRef ref) {
   return DayState._(next, focus);
 }
 
-/// Removes the slot. When the focus was in it, focus goes to the first planned set.
 DayState _removeExercise(DayState state, ExerciseId exercise) {
   final w = state.workout;
   final i = w.indexOf(exercise);
@@ -535,7 +487,6 @@ DayState _removeExercise(DayState state, ExerciseId exercise) {
   return DayState._(next, state.focus?.exercise == exercise ? _firstPlanned(next) : state.focus);
 }
 
-/// Appends a planned copy of the slot's last set (same values, not a warm-up, no note) and focuses it.
 DayState _addSet(DayState state, ExerciseId exercise) {
   final w = state.workout;
   final i = w.indexOf(exercise);
@@ -545,7 +496,6 @@ DayState _addSet(DayState state, ExerciseId exercise) {
   return DayState._(_withSlot(w, i, Slot(slot.exercise, [...slot.sets, copy])), (exercise: exercise, index: slot.sets.length));
 }
 
-/// Moves the slot at [from] so it ends at [to]. Returns [w] itself when [from] == [to] or either is out of range.
 Workout _move(Workout w, int from, int to) {
   final n = w.slots.length;
   if (from == to || from < 0 || from >= n || to < 0 || to >= n) return w;
@@ -554,14 +504,12 @@ Workout _move(Workout w, int from, int to) {
   return Workout(day: w.day, note: w.note, slots: slots);
 }
 
-/// Replaces the slot's copy of the exercise with the same id. Returns [w] itself when the day lacks it or it is unchanged.
 Workout _updateExercise(Workout w, Exercise exercise) {
   final i = w.indexOf(exercise.id);
   if (i < 0 || w.slots[i].exercise == exercise) return w;
   return _withSlot(w, i, Slot(exercise, w.slots[i].sets));
 }
 
-/// Applies [change] to one set. Returns [w] itself when [ref] is missing or [change] gives an equal set.
 Workout _replaceSet(Workout w, SetRef ref, SetEntry Function(SetEntry) change) {
   final before = w.setAt(ref);
   if (before == null) return w;
@@ -581,7 +529,6 @@ SetRef? _firstPlanned(Workout w) {
   return null;
 }
 
-/// The first planned set of [exercise] at or after [start], wrapping to the start of that exercise, else the first planned set of the workout.
 SetRef? _plannedFrom(Workout w, ExerciseId exercise, int start) {
   final sets = w.slotOf(exercise)?.sets ?? const <SetEntry>[];
   for (var k = 0; k < sets.length; k++) {
@@ -601,7 +548,6 @@ int _compareFields(ExerciseKind kind, SetEntry a, SetEntry b) {
 
 String _twoDigits(int n) => n.toString().padLeft(2, '0');
 
-/// [value] in thousandths as a decimal with at most [decimals] places and no trailing zeros, rounding half away from zero.
 String _thousandths(int value, {required int decimals}) {
   var unit = 1;
   for (var i = decimals; i < 3; i++) {

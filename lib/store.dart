@@ -1,5 +1,3 @@
-/// Everything about the SQLite file: the schema and its migrations, the queries, the whole-day save, the settings, and the import policy.
-///
 /// Nothing outside this file sees a table name, a column, a [Row] or a [SqliteException]. Callers get the domain types from day.dart and the import types declared here. Every method is synchronous; on the phone each one runs on the UI isolate in a few milliseconds, except an import, which runs on its own isolate with its own connection (see fitnotes.dart).
 library;
 
@@ -9,7 +7,6 @@ import 'package:sqlite3/sqlite3.dart';
 
 import 'day.dart';
 
-/// The increment and rest a new exercise gets when its creator names none.
 typedef ExerciseDefaults = ({int weightStepGrams, Duration rest});
 
 final class Store {
@@ -18,7 +15,6 @@ final class Store {
   /// Opens or creates the database at [path], applies the connection settings and migrates it to the schema this build knows. Before migrating a file that already holds a schema, it copies the file to `<path>.v<from>.bak`. Throws [StoreTooNew] when the file was written by a newer build, before writing anything to it.
   factory Store.open(String path) => _connect(sqlite3.open(path), path);
 
-  /// A migrated in-memory database, for tests on the VPS.
   factory Store.inMemory() => _connect(sqlite3.openInMemory(), null);
 
   static Store _connect(Database db, String? path) {
@@ -36,7 +32,6 @@ final class Store {
 
   final Database _db;
 
-  /// The file this store writes, so the importer can open its own connection on another isolate. Null for [Store.inMemory].
   final String? path;
 
   final Map<String, PreparedStatement> _statements = {};
@@ -44,7 +39,6 @@ final class Store {
   /// Statements are prepared on first use and kept, because the whole-day save runs after every stepper tap.
   PreparedStatement _sql(String sql) => _statements[sql] ??= _db.prepare(sql, persistent: true);
 
-  /// The day as saved, or an empty [Workout] for a day with no row. Slots come back in position order and sets in index order. Each slot carries the exercise as it is now, joined from the exercise table.
   Workout loadDay(Day day) => _assemble(_sql('$_selectDays WHERE w.day = ? ORDER BY sl.position, s.set_index').select([day.iso])).firstOrNull ?? Workout(day: day);
 
   /// Replaces everything the database holds for [workout.day] with [workout], in one transaction. Saving the same day twice leaves the same rows. An empty day is deleted. Also records the day in app_day, which hands it from the importer to the app for good.
@@ -62,14 +56,11 @@ final class Store {
   }
 
   /// The done sets of [exercise] on the most recent day before [before] on which any of its sets was done, in set order, notes included. Empty when it was never done. Planned sets never count, so a day copied ahead and not trained is skipped.
-  ///
-  /// Pass it through [alignLastTime] for the muted "last time" text, and as [AddExercise.lastSession] for the plan of a newly added exercise.
   List<SetEntry> lastSession(ExerciseId exercise, {required Day before}) {
     final rows = _sql('SELECT $_setColumns FROM workout_set s WHERE s.exercise_id = ?1 AND s.done = 1 AND s.day = (SELECT MAX(day) FROM workout_set WHERE exercise_id = ?1 AND done = 1 AND day < ?2) ORDER BY s.set_index').select([exercise.value, before.iso]);
     return [for (final row in rows) _set(row)];
   }
 
-  /// Every day on which [exercise] has a done set, newest first, at most [limit] days, each with its done sets in set order, notes included. Planned sets never count. Feeds the exercise history screen.
   List<({Day day, List<SetEntry> sets})> exerciseHistory(ExerciseId exercise, {int limit = 200}) {
     final rows = _sql('SELECT s.day, $_setColumns FROM workout_set s WHERE s.exercise_id = ?1 AND s.done = 1 AND s.day IN (SELECT DISTINCT day FROM workout_set WHERE exercise_id = ?1 AND done = 1 ORDER BY day DESC LIMIT ?2) ORDER BY s.day DESC, s.set_index').select([exercise.value, limit]);
     final sessions = <({Day day, List<SetEntry> sets})>[];
@@ -81,16 +72,13 @@ final class Store {
     return sessions;
   }
 
-  /// Saved days before [before] (all days when null), newest first, at most [limit]. Feeds the history list and the empty day's "Copy" list, which therefore show the same thing. Page by passing the last day of the previous page.
   List<Workout> recentWorkouts({Day? before, int limit = 30}) => _assemble(_sql('$_selectDays WHERE w.day IN (SELECT day FROM workout WHERE ?1 IS NULL OR day < ?1 ORDER BY day DESC LIMIT ?2) ORDER BY w.day DESC, sl.position, s.set_index').select([before?.iso, limit]));
 
-  /// Every exercise, most recently done first, then never-done ones by name. Planned sets do not count as done. The picker filters this list in memory.
   List<Exercise> exercises() {
     final rows = _sql('SELECT $_exerciseColumns FROM exercise e ORDER BY (SELECT MAX(day) FROM workout_set s WHERE s.exercise_id = e.id AND s.done = 1) DESC NULLS LAST, e.name').select();
     return [for (final row in rows) _exercise(row)];
   }
 
-  /// The global defaults from the setting table, else 2.5 kg and 120 s.
   ExerciseDefaults loadDefaults() {
     final values = {for (final row in _sql('SELECT key, value FROM setting').select()) row['key'] as String: row['value']};
     return (
@@ -253,7 +241,6 @@ final class Store {
     _sql('INSERT INTO setting (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').execute([key, value]);
   }
 
-  /// [name], or the first of `name (source)`, `name (source 2)`, ... that no exercise holds, ignoring case.
   String _freeName(String name, String source) {
     for (var n = 1;; n++) {
       final candidate = switch (n) {
@@ -275,7 +262,6 @@ const _restKey = 'default_rest_s';
 const _exerciseColumns = 'e.id, e.name, e.kind, e.category, e.weight_step_g, e.rest_s';
 const _setColumns = 's.weight_g, s.reps, s.metres, s.seconds, s.warmup, s.done, s.logged_at, s.note AS set_note';
 
-/// Every row of the selected days, one per set, with note-only days as a single row of NULL slot columns. [_assemble] folds them.
 const _selectDays = 'SELECT w.day, w.note AS day_note, $_exerciseColumns, $_setColumns FROM workout w LEFT JOIN workout_slot sl ON sl.day = w.day LEFT JOIN exercise e ON e.id = sl.exercise_id LEFT JOIN workout_set s ON s.day = sl.day AND s.exercise_id = sl.exercise_id';
 
 /// Folds [_selectDays] rows, already in day, position and set order, into workouts. Rows parse through the validating [Day], [Slot] and [Workout] constructors, so a corrupt row fails here with an error instead of reaching a screen.
@@ -300,7 +286,6 @@ SetEntry _set(Row row) {
   return SetEntry(grams: row['weight_g'] as int, reps: row['reps'] as int, metres: row['metres'] as int, seconds: row['seconds'] as int, warmup: row['warmup'] == 1, note: row['set_note'] as String, status: row['done'] == 1 ? Done(loggedAt == null ? null : DateTime.fromMillisecondsSinceEpoch(loggedAt)) : const Planned());
 }
 
-/// Runs [body] inside `BEGIN IMMEDIATE ... COMMIT`, rolling back and rethrowing on any error.
 T _inTransaction<T>(Database db, T Function() body) {
   db.execute('BEGIN IMMEDIATE');
   try {
@@ -419,7 +404,6 @@ void _migrate(Database db, String? path) {
   }
 }
 
-/// What an importer hands to [Store.importBatch]. It holds domain values only, keyed by the source's own exercise ids. No source rows and no Setlist ids cross this boundary.
 final class ImportBatch {
   const ImportBatch({required this.source, required this.exercises, required this.days, this.defaultWeightStepGrams, this.defaultRest});
 
@@ -466,12 +450,10 @@ final class ImportReport {
 
   final int exercisesCreated;
 
-  /// Exercises the batch matched to one already in Setlist, by import key or by name.
   final int exercisesLinked;
   final int daysWritten;
   final int setsWritten;
 
-  /// Days the app had saved, which the import left alone.
   final List<Day> skippedDays;
 }
 
