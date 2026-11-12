@@ -53,6 +53,24 @@ A set holds weight in kg, reps, seconds, whether it is a warm-up, and its status
 
 Saving writes the whole day in one transaction, replacing what the database held for that date. Saving the same day twice leaves the same rows. A day with no exercises and no note is deleted.
 
+## Screen details
+
+**Workout screen app bar.** The title is "Today", "Yesterday" or a short date such as "Thu 12 Nov". Tapping it opens a date picker to jump to any day. Actions are History and an overflow with "Workout note" and "Copy a past workout".
+
+**Card header.** Exercise name, progress (`2/4`, or a check when finished), a drag handle, and a menu with History, Edit exercise and Remove. Tapping the header collapses or expands the card. A finished card collapses on its own unless the lifter opened it or the focus is inside it, and shows one summary line such as `4 sets · top 100 × 5`.
+
+**Set row.** Set number (`W` for a warm-up), the values the kind shows (`100 kg × 5`, `1:30`, `2.5 km · 12:00`), the muted last-time value, and a check circle. The focused row has a filled highlight. A note shows under the values in small text. Swiping a row away deletes the set with an Undo snackbar. Long-pressing a row offers warm-up on or off, the note, and delete. Each card ends with "Add set".
+
+**Panel.** The exercise name and "Set 2 of 4", then one stepper per field of the kind, side by side when there are two, with buttons at least 56 dp. Tapping a value opens a numeric dialog that commits once on OK. One full-width button: "Log set" on a planned set, "Next set" on a done one. While resting, a countdown shows in the panel. When nothing is planned, the panel shows the session summary instead.
+
+**Feedback.** Logging, removing and copying each show a snackbar with Undo. Nothing asks for confirmation except restoring a backup, which replaces all data. When the focus moves to another exercise, its card scrolls into view.
+
+**History screen.** Past days newest first, each with the date, the exercise names and the set count. Tapping a day opens it on the same workout screen. Tapping today returns to the home screen instead, so one day never has two screens writing it. A copy button on each day copies it into today through the home screen. The overflow holds the data actions: import a FitNotes backup, export a Setlist backup, restore a Setlist backup.
+
+**Exercise history.** From a card's menu: the past sessions of that exercise, newest first, each with its sets and its best estimated one-rep max (Brzycki, the formula FitNotes uses), marked when it set a new best.
+
+**Exercise picker.** A search field with focus on open, the exercises ordered by last use, and a "Create" row for a name that does not exist yet. Creating asks for the name, the kind, an optional category, the weight step and the rest time, prefilled with the defaults.
+
 ## Out of scope for the first version
 
 Routines and templates (copying a past day covers how the owner works), supersets, charts, body weight, units other than kg, cloud sync. Each can come later without changing the day aggregate.
