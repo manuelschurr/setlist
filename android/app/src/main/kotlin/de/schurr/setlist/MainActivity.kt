@@ -10,11 +10,13 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    private var askedForNotifications = false
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Asked at launch rather than on the first rest: the request returns before the user answers, so a countdown posted right after it is dropped, and the Dart side never sends the same rest twice.
+        if (savedInstanceState == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 0)
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -23,7 +25,6 @@ class MainActivity : FlutterActivity() {
             try {
                 when (call.method) {
                     "show" -> {
-                        askForNotifications()
                         RestAlarm.show(this, call.argument<String>("title")!!, call.argument<Number>("endsAtMs")!!.toLong())
                         result.success(null)
                     }
@@ -36,14 +37,6 @@ class MainActivity : FlutterActivity() {
             } catch (e: Exception) {
                 result.error("rest", e.toString(), null)
             }
-        }
-    }
-
-    private fun askForNotifications() {
-        if (askedForNotifications || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        askedForNotifications = true
-        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 0)
         }
     }
 }
