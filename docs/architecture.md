@@ -41,4 +41,5 @@ Every implementer checks these off. They come from the judge's defect list, `doc
 | `lib/workout_screen.dart` | The live day: dispatch, undo, save retry, alarm sync, the list, cards, rows and the docked panel. |
 | `lib/history_screen.dart` | Paged past days, copy to today, and the data menu. |
 | `lib/exercise_picker.dart` | `pickExercise` and the create-exercise dialog. |
+| `lib/exercise_history_screen.dart` | One exercise's past sessions with the best estimated one-rep max per session. |
 | `lib/main.dart` | Opens the database and shows today. |
