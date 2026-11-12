@@ -290,5 +290,50 @@ void main() {
       expect(opened.recentWorkouts(), store.recentWorkouts());
       expect(opened.exercises(), store.exercises());
     });
+
+    List<String> beforeRestore() => [for (final f in Directory(File(path).parent.path).listSync()) if (f.path.contains('.before-restore-')) f.path];
+
+    test('restoring a copy brings its history back and keeps the database from before', () {
+      final exported = Workout(day: d1, slots: [Slot(squat, [done(100000, 5)])]);
+      store.saveDay(exported);
+      final copy = '$path.export';
+      store.copyTo(copy);
+      store.saveDay(Workout(day: d2, note: 'after the export'));
+      store.close();
+      File('$path-wal').writeAsStringSync('stale');
+      File('$path-shm').writeAsStringSync('stale');
+
+      Store.replaceWith(copy, dbPath: path);
+      expect([File(copy).existsSync(), File('$path-wal').existsSync(), File('$path-shm').existsSync()], [false, false, false]);
+      store = Store.open(path);
+      expect(store.recentWorkouts(), [exported]);
+      final previous = Store.open(beforeRestore().single);
+      addTearDown(previous.close);
+      expect(previous.loadDay(d2).note, 'after the export');
+    });
+
+    test('restore refuses a file that is not a Setlist database this build can open, and changes nothing', () {
+      store.saveDay(Workout(day: d1, slots: [Slot(squat, [done(100000, 5)])]));
+      final newer = '$path.newer';
+      store.copyTo(newer);
+      sqlite3.open(newer)
+        ..userVersion = 1000
+        ..close();
+      final fitNotes = '$path.fitnotes';
+      sqlite3.open(fitNotes)
+        ..execute('CREATE TABLE training_log (_id INTEGER PRIMARY KEY); PRAGMA user_version = 22;')
+        ..close();
+      final text = '$path.txt';
+      File(text).writeAsStringSync('not a database at all, just some text that is long enough to have a header');
+      store.close();
+      final before = dump(path);
+
+      for (final (file, says) in [(newer, 'newer version'), (fitNotes, 'not a Setlist backup'), (text, 'not a Setlist backup'), ('$path.missing', 'not a Setlist backup')]) {
+        expect(() => Store.replaceWith(file, dbPath: path), throwsA(isA<NotASetlistBackup>().having((e) => e.message, 'message', contains(says))), reason: file);
+      }
+      expect(dump(path), before);
+      expect(beforeRestore(), isEmpty);
+      store = Store.open(path);
+    });
   });
 }
