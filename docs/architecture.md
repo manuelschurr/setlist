@@ -42,4 +42,6 @@ Every implementer checks these off. They come from the judge's defect list, `doc
 | `lib/history_screen.dart` | Paged past days, copy to today, and the data menu. |
 | `lib/exercise_picker.dart` | `pickExercise` and the create-exercise dialog. |
 | `lib/exercise_history_screen.dart` | One exercise's past sessions with the best estimated one-rep max per session. |
-| `lib/main.dart` | Opens the database and shows today, and starts over on today when the app resumes on a later day with no set logged in the last 3 hours. |
+| `lib/drive_backup.dart` | `BackupLink` (the linked file's URI and name, the last success and the last error, kept in `setlist.sqlite.drive-backup.json` beside the database, never in it), the rule that backs up only when the database or its `-wal` file was written after the last success, and the one-at-a-time queue of link, backup, fetch and unlink calls over the `de.schurr.setlist/documents` channel that `Documents.kt` answers through Android's Storage Access Framework. |
+| `lib/drive_backup_screen.dart` | The Google Drive backup screen: link, status, back up now, restore, change, stop. |
+| `lib/main.dart` | Opens the database and shows today, starts over on today when the app resumes on a later day with no set logged in the last 3 hours, and backs up to the linked file each time the app goes to the background. |

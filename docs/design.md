@@ -65,7 +65,9 @@ Saving writes the whole day in one transaction, replacing what the database held
 
 **Feedback.** Logging, removing and copying each show a snackbar with Undo. Nothing asks for confirmation except restoring a backup, which replaces all data. When the focus moves to another exercise, its card scrolls into view.
 
-**History screen.** Past days newest first, each with the date, the exercise names and the set count. Tapping a day opens it on the same workout screen. Tapping today returns to the home screen instead, so one day never has two screens writing it. A copy button on each day copies it into today through the home screen. The overflow holds the data actions: import a FitNotes backup, export a Setlist backup, restore a Setlist backup.
+**History screen.** Past days newest first, each with the date, the exercise names and the set count. Tapping a day opens it on the same workout screen. Tapping today returns to the home screen instead, so one day never has two screens writing it. A copy button on each day copies it into today through the home screen. The overflow holds the data actions: the Google Drive backup screen, import a FitNotes backup, export a Setlist backup, restore a Setlist backup.
+
+**Google Drive backup.** The lifter links one backup file once, through the system picker's create dialog, usually in Google Drive. From then on, each time the app goes to the background after the database changed, Setlist writes a fresh copy of the whole database over that file, and the Drive app uploads it. The screen shows the file name and the time of the last backup that reached it, or the last error, with Back up now, Restore from this backup (with the restore confirmation), Change file and Stop backing up. Unlinked, it shows one sentence and Choose backup file. A new phone has no link, so it restores through the picker first.
 
 **Exercise history.** From a card's menu: the past sessions of that exercise, newest first, each with its sets and its best estimated one-rep max (Brzycki, the formula FitNotes uses), marked when it set a new best.
 

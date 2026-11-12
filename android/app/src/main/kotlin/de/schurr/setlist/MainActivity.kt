@@ -1,6 +1,7 @@
 package de.schurr.setlist
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -10,6 +11,8 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private val documents = Documents(this)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -38,5 +41,10 @@ class MainActivity : FlutterActivity() {
                 result.error("rest", e.toString(), null)
             }
         }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "de.schurr.setlist/documents").setMethodCallHandler(documents)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (!documents.onActivityResult(requestCode, resultCode, data)) super.onActivityResult(requestCode, resultCode, data)
     }
 }

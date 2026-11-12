@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'day.dart';
+import 'drive_backup_screen.dart';
 import 'fitnotes.dart';
 import 'store.dart';
 import 'workout_screen.dart';
@@ -22,7 +23,7 @@ class HistoryScreen extends StatefulWidget {
   State<HistoryScreen> createState() => _HistoryScreenState();
 }
 
-enum _DataAction { import, export, restore }
+enum _DataAction { drive, import, export, restore }
 
 class _HistoryScreenState extends State<HistoryScreen> {
   final List<Workout> _days = [];
@@ -135,20 +136,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<void> _restore() async {
-    await _withPickedCopy('Setlist backup', 'setlist-restore.sqlite', (copy) async {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Restore this backup?'),
-          content: const Text('Everything in Setlist is replaced by the backup. Workouts logged after it was made are lost. A copy of the current data stays on the phone.'),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Restore')),
-          ],
-        ),
-      );
-      if (confirmed == true) widget.home.restore(copy.path);
-    });
+    await _withPickedCopy('Setlist backup', 'setlist-restore.sqlite', (copy) => widget.home.confirmRestore(context, copy.path));
   }
 
   @override
@@ -163,11 +151,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
               enabled: !_busy,
               tooltip: 'Data',
               onSelected: (action) => switch (action) {
+                _DataAction.drive => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => DriveBackupScreen(home: widget.home))),
                 _DataAction.import => _import(),
                 _DataAction.export => _export(),
                 _DataAction.restore => _restore(),
               },
               itemBuilder: (_) => const [
+                PopupMenuItem(value: _DataAction.drive, child: Text('Google Drive backup')),
                 PopupMenuItem(value: _DataAction.import, child: Text('Import FitNotes backup')),
                 PopupMenuItem(value: _DataAction.export, child: Text('Export Setlist backup')),
                 PopupMenuItem(value: _DataAction.restore, child: Text('Restore Setlist backup')),

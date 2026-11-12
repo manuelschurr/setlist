@@ -7,19 +7,37 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import 'day.dart';
+import 'drive_backup.dart';
 import 'exercise_history_screen.dart';
 import 'exercise_picker.dart';
 import 'history_screen.dart';
 import 'rest_alarm.dart';
 import 'store.dart';
 
-/// What the app's home screen holds. The home shows [day], today as of app start or of the resume that moved it to a new day, and it is the only screen ever opened for that day, so no second screen writes it: history pops back to the home instead of opening it again. Only the home drives [alarm], because the countdown belongs to today and a screen for another day would cancel it. [restore] swaps the database file and rebuilds the app from a new home.
+/// What the app's home screen holds. The home shows [day], today as of app start or of the resume that moved it to a new day, and it is the only screen ever opened for that day, so no second screen writes it: history pops back to the home instead of opening it again. Only the home drives [alarm], because the countdown belongs to today and a screen for another day would cancel it. [restore] swaps the database file and rebuilds the app from a new home. [backup] outlives every home, because it belongs to the database file.
 final class Home {
-  const Home({required this.day, required this.alarm, required this.restore});
+  const Home({required this.day, required this.alarm, required this.restore, required this.backup});
 
   final Day day;
   final RestAlarm alarm;
   final ValueChanged<String> restore;
+  final DriveBackup backup;
+
+  /// Asks before [restore], the one confirmation in the app, because a restore replaces everything.
+  Future<void> confirmRestore(BuildContext context, String backupPath) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Restore this backup?'),
+        content: const Text('Everything in Setlist is replaced by the backup. Workouts logged after it was made are lost. A copy of the current data stays on the phone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Restore')),
+        ],
+      ),
+    );
+    if (confirmed == true) restore(backupPath);
+  }
 }
 
 class WorkoutScreen extends StatefulWidget {

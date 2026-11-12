@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'day.dart';
+import 'drive_backup.dart';
 import 'rest_alarm.dart';
 import 'store.dart';
 import 'workout_screen.dart';
@@ -26,16 +29,19 @@ class SetlistApp extends StatefulWidget {
 
 class _SetlistAppState extends State<SetlistApp> with WidgetsBindingObserver {
   late Store _store = Store.open(widget.dbPath);
+  late final _backup = DriveBackup(dbPath: widget.dbPath, store: () => _store);
   late Home _home = _newHome();
   final _messenger = GlobalKey<ScaffoldMessengerState>();
 
-  Home _newHome() => Home(day: Day.of(widget.clock()), alarm: widget.alarm, restore: _restore);
+  Home _newHome() => Home(day: Day.of(widget.clock()), alarm: widget.alarm, restore: _restore, backup: _backup);
 
   /// A process that lives through the night would otherwise show yesterday and log onto it. A set logged within [_midnightSessionGrace] means a session that crossed midnight, which stays on its day.
   static const _midnightSessionGrace = Duration(hours: 3);
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The backup starts in a later microtask, after the workout screen's own paused handler has retried a failed save.
+    if (state == AppLifecycleState.paused) unawaited(_backup.backUpIfChanged());
     if (state != AppLifecycleState.resumed) return;
     final now = widget.clock();
     if (Day.of(now) == _home.day) return;
@@ -72,6 +78,7 @@ class _SetlistAppState extends State<SetlistApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _backup.dispose();
     _store.close();
     super.dispose();
   }
