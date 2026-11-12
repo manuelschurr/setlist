@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Runs flutter under a host-wide lock: two concurrent Gradle builds exceed this VPS's RAM.
+set -euo pipefail
+export PATH="/opt/flutter/bin:$PATH" ANDROID_HOME=/opt/android-sdk
+exec flock "${XDG_RUNTIME_DIR:-/tmp}/setlist-flutter.lock" flutter "$@" 2> >(grep -v -i -e 'woah' -e 'running flutter as root' -e "We strongly recommend" -e '^\s*$' -e '│' -e '┌' -e '└' >&2)
