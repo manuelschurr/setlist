@@ -51,7 +51,7 @@ void main() {
     tester.view.physicalSize = const Size(1080, 2340);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(MaterialApp(theme: setlistTheme(Brightness.light), home: WorkoutScreen(store: store, home: Home(day: today, alarm: alarm), day: today)));
+    await tester.pumpWidget(MaterialApp(theme: setlistTheme(Brightness.light), home: WorkoutScreen(store: store, home: Home(day: today, alarm: alarm, restore: (_) {}), day: today)));
   }
 
   List<SetEntry> savedSets(Exercise e) => store.loadDay(today).slotOf(e.id)!.sets;

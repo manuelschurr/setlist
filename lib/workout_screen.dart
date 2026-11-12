@@ -15,12 +15,13 @@ import 'history_screen.dart';
 import 'rest_alarm.dart';
 import 'store.dart';
 
-/// What the app's home screen holds. The home shows [day], today as of app start, and it is the only screen ever opened for that day, so no second screen writes it: history pops back to the home instead of opening it again. Only the home drives [alarm], because the countdown belongs to today and a screen for another day would cancel it.
+/// What the app's home screen holds. The home shows [day], today as of app start, and it is the only screen ever opened for that day, so no second screen writes it: history pops back to the home instead of opening it again. Only the home drives [alarm], because the countdown belongs to today and a screen for another day would cancel it. [restore] swaps the database file and rebuilds the app from a new home.
 final class Home {
-  const Home({required this.day, required this.alarm});
+  const Home({required this.day, required this.alarm, required this.restore});
 
   final Day day;
   final RestAlarm alarm;
+  final ValueChanged<String> restore;
 }
 
 class WorkoutScreen extends StatefulWidget {
