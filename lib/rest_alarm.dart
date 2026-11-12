@@ -11,7 +11,7 @@ abstract interface class RestAlarm {
   void show(Rest? rest);
 }
 
-/// Talks to MainActivity over a method channel. The Kotlin side (RestAlarm.kt) posts a notification with a count-down chronometer whose `when` is [Rest.endsAt], and sets AlarmManager.setExactAndAllowWhileIdle so a receiver vibrates and posts "Rest over" at that time.
+/// Talks to MainActivity over a method channel. The Kotlin side (RestAlarm.kt) posts a notification with a count-down chronometer whose `when` is [Rest.endsAt], and sets AlarmManager.setAlarmClock so a receiver vibrates and posts "Rest over" at that time.
 final class AndroidRestAlarm implements RestAlarm {
   static const _channel = MethodChannel('de.schurr.setlist/rest');
 

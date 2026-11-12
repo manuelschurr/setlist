@@ -40,7 +40,8 @@ object RestAlarm {
         val fire = alarmIntent(context, title)
         // Android 12 lets the user revoke exact alarms in Settings; the inexact alarm still fires, only later.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarms.canScheduleExactAlarms()) {
-            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, endsAtMs, fire)
+            // OxygenOS gives setExactAndAllowWhileIdle a window of 0.75 of the delay, so the alarm could land after the app had already cancelled it; an alarm clock is never deferred.
+            alarms.setAlarmClock(AlarmManager.AlarmClockInfo(endsAtMs, openApp(context)), fire)
         } else {
             alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, endsAtMs, fire)
         }
