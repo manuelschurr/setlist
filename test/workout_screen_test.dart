@@ -188,6 +188,24 @@ void main() {
     expect(inPanel(find.text('6 reps')), findsOneWidget);
   });
 
+  testWidgets('when the focus moves to an exercise off the screen, its card scrolls into view', (tester) async {
+    final row = store.createExercise(name: 'Row', kind: ExerciseKind.weightReps);
+    store.saveDay(Workout(day: today, slots: [Slot(squat, sets(5, 100, 5)), Slot(bench, sets(5, 80, 8)), Slot(row, sets(1, 60, 10))]));
+    await openToday(tester);
+    await tester.ensureVisible(find.text('60 kg × 10', skipOffstage: false));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('60 kg × 10'));
+    await tester.pump();
+    expect(inPanel(find.text('Row')), findsOneWidget);
+    expect(find.text('100 kg × 5'), findsNothing);
+
+    await tester.tap(inPanel(find.text('Log set')));
+    await tester.pumpAndSettle();
+    expect(inPanel(find.text('Squat')), findsOneWidget);
+    expect(inPanel(find.text('Set 1 of 5')), findsOneWidget);
+    expect(find.text('100 kg × 5'), findsNWidgets(5));
+  });
+
   testWidgets('the picker adds an exercise with planned sets from its last session, and creates a new one', (tester) async {
     final deadlift = store.createExercise(name: 'Deadlift', kind: ExerciseKind.weightReps);
     store.saveDay(Workout(day: daysAgo(2), slots: [Slot(deadlift, [kg(140, 5, done: true), kg(140, 5, done: true), kg(150, 3, done: true)])]));
