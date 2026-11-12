@@ -304,6 +304,14 @@ void main() {
       expect(opened.exercises(), store.exercises());
     });
 
+    test('a copy that SQLite or the file system refuses fails as a store write', () {
+      final folder = File(path).parent.path;
+      expect(() => store.copyTo('$folder/missing/copy.sqlite'), throwsA(isA<StoreWriteFailed>().having((e) => e.cause, 'cause', isA<SqliteException>())));
+      Directory('$folder/taken').createSync();
+      File('$folder/taken/file').writeAsStringSync('x');
+      expect(() => store.copyTo('$folder/taken'), throwsA(isA<StoreWriteFailed>().having((e) => e.cause, 'cause', isA<FileSystemException>())));
+    });
+
     List<String> beforeRestore() => [for (final f in Directory(File(path).parent.path).listSync()) if (f.path.contains('.before-restore-')) f.path];
 
     test('restoring a copy brings its history back and keeps the database from before', () {

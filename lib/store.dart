@@ -169,8 +169,16 @@ final class Store {
     }
   }
 
-  /// Writes a consistent copy of the whole database to [destination] with `VACUUM INTO`, replacing any file already there. The importer calls it before writing, and the export action shares the same file.
-  void copyTo(String destination) => _vacuumInto(_db, destination);
+  /// Writes a consistent copy of the whole database to [destination] with `VACUUM INTO`, replacing any file already there. The importer calls it before writing, and the export action shares the same file. Throws [StoreWriteFailed] when SQLite or the file system refuses the copy.
+  void copyTo(String destination) {
+    try {
+      _vacuumInto(_db, destination);
+    } on SqliteException catch (e) {
+      throw StoreWriteFailed(e);
+    } on FileSystemException catch (e) {
+      throw StoreWriteFailed(e);
+    }
+  }
 
   /// Restores a copy made by [copyTo]: moves [backupPath] over the database at [dbPath]. Close every store on [dbPath] first and open a new one after, which migrates an older copy. Throws [NotASetlistBackup] and changes nothing when [backupPath] is not a Setlist database this build can open. Otherwise copies the current database to `<dbPath>.before-restore-<unix ms>` and removes its `-wal` and `-shm` files, because SQLite would replay a leftover log onto the restored file.
   static void replaceWith(String backupPath, {required String dbPath}) {

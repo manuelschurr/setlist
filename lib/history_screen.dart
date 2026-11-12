@@ -130,8 +130,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
       widget.store.copyTo(copy.path);
       final saved = await FilePicker.saveFile(fileName: name, bytes: await copy.readAsBytes(), dialogTitle: 'Save Setlist backup');
       if (saved != null) _say('Backup saved');
-    } on Exception catch (e) {
-      _say('Export failed: $e');
+    } on StoreWriteFailed {
+      _say('The export could not copy the database.');
     } finally {
       if (await copy.exists()) await copy.delete();
       if (mounted) setState(() => _busy = false);
