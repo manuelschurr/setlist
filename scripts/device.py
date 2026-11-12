@@ -79,7 +79,7 @@ def main():
     elif cmd == "install":
         print(adb("install", "-r", args[0]).strip())
     elif cmd == "launch":
-        adb("shell", "am", "start", "-n", f"{args[0] if args else PACKAGE}/.MainActivity")
+        adb("shell", "am", "start", "-n", f"{args[0] if args else PACKAGE}/de.schurr.setlist.MainActivity")
     elif cmd == "stop":
         adb("shell", "am", "force-stop", args[0] if args else PACKAGE)
     elif cmd == "wait":

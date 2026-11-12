@@ -1,8 +1,16 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// Release signing lives outside the repo; tools/release-key.sh makes it once. Without it a release build falls back to the debug key, which Obtainium installs cannot update.
+val signingProperties = (System.getenv("SETLIST_ANDROID_SIGNING") ?: "${System.getProperty("user.home")}/.config/setlist/android/signing.properties")
+    .let(::File)
+    .takeIf { it.exists() }
+    ?.let { file -> Properties().apply { file.inputStream().use(::load) } }
 
 android {
     namespace = "de.schurr.setlist"
@@ -15,10 +23,8 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "de.schurr.setlist"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        manifestPlaceholders["appLabel"] = "Setlist"
         // 26 for notification channels and VibrationEffect, so the rest alarm needs no compat branches.
         minSdk = 26
         targetSdk = flutter.targetSdkVersion
@@ -26,11 +32,25 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (signingProperties != null) {
+            create("release") {
+                storeFile = file(signingProperties.getProperty("storeFile"))
+                storePassword = signingProperties.getProperty("password")
+                keyAlias = signingProperties.getProperty("keyAlias")
+                keyPassword = signingProperties.getProperty("password")
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            // A separate app on the phone, so a test build never replaces the installed release or its data.
+            applicationIdSuffix = ".debug"
+            manifestPlaceholders["appLabel"] = "Setlist debug"
+        }
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (signingProperties != null) "release" else "debug")
         }
     }
 }
