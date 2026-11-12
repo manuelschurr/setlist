@@ -19,7 +19,8 @@ android {
         applicationId = "de.schurr.setlist"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // 26 for notification channels and VibrationEffect, so the rest alarm needs no compat branches.
+        minSdk = 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
