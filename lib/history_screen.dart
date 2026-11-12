@@ -1,5 +1,3 @@
-/// Past days, newest first, and the data menu: import a FitNotes backup, export a Setlist backup, restore a Setlist backup. Reads through [Store.recentWorkouts], the same query as the empty day's Copy list, and summarises each day with the getters on [Workout] and [Slot], the same ones the workout screen uses.
-///
 /// Pops with a [Workout] when the lifter copies a day, which the home screen copies into today, and with nothing otherwise.
 library;
 
@@ -52,7 +50,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     _loadMore();
   }
 
-  /// Today pops back to the home screen, which already shows it. Any other day opens on a workout screen of its own; a day picked there comes back here and opens in turn.
   Future<void> _open(Day day) async {
     if (day == widget.home.day) {
       Navigator.pop(context);
@@ -102,7 +99,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     });
   }
 
-  /// Sets written against training_log rows, days written and skipped, exercises created and matched, and what the reader left out, such as routines and superset groups.
   Future<void> _showOutcome(ImportOutcome outcome) {
     final w = outcome.written;
     final skipped = w.skippedDays;

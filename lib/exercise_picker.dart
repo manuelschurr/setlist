@@ -1,4 +1,3 @@
-/// Choosing an exercise for a day, creating one, or editing one. Two entry points, [pickExercise] and [editExercise]; the screen and the dialog behind them are private.
 library;
 
 import 'package:flutter/material.dart';
@@ -7,7 +6,6 @@ import 'day.dart';
 import 'store.dart';
 import 'workout_screen.dart';
 
-/// Shows every exercise, most recently done first, with a search field, and returns the one picked, or null on back. Exercises already in the day carry a check and can still be picked, so the caller scrolls to them. When the search matches no name exactly, the first row offers to create it.
 Future<Exercise?> pickExercise(BuildContext context, Store store, {Set<ExerciseId> inDay = const {}}) {
   return Navigator.push<Exercise>(context, MaterialPageRoute(builder: (_) => _PickerScreen(store: store, inDay: inDay)));
 }
@@ -43,7 +41,6 @@ class _PickerScreenState extends State<_PickerScreen> {
   late final List<Exercise> _all = widget.store.exercises();
   String _query = '';
 
-  /// Name or category contains the query, ignoring case, in the store's order.
   List<Exercise> get _matches {
     final q = _query.trim().toLowerCase();
     if (q.isEmpty) return _all;

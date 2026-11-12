@@ -1,4 +1,3 @@
-/// The past sessions of one exercise, newest first, opened from a card's menu. Read-only.
 library;
 
 import 'package:flutter/material.dart';
@@ -20,7 +19,6 @@ class ExerciseHistoryScreen extends StatefulWidget {
   State<ExerciseHistoryScreen> createState() => _ExerciseHistoryScreenState();
 }
 
-/// One past day of the exercise, with its best estimate in grams when the kind has one, and whether that beat every older session.
 typedef _Session = ({Day day, List<SetEntry> sets, double? best, bool newBest});
 
 class _ExerciseHistoryScreenState extends State<ExerciseHistoryScreen> {
