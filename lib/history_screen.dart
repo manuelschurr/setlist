@@ -1,23 +1,19 @@
-/// Past days, newest first, and the FitNotes import. Reads through [Store.recentWorkouts], the same query as the empty day's Copy list, and summarises each day with the getters on [Workout] and [Slot], the same ones the workout screen uses.
+/// Past days, newest first. Reads through [Store.recentWorkouts], the same query as the empty day's Copy list, and summarises each day with the getters on [Workout] and [Slot], the same ones the workout screen uses.
+///
+/// Pops with a [Workout] when the lifter copies a day, which the home screen copies into today, and with nothing otherwise.
 library;
 
-import 'dart:io';
-
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 
 import 'day.dart';
-import 'fitnotes.dart';
-import 'rest_alarm.dart';
 import 'store.dart';
 import 'workout_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
-  const HistoryScreen({super.key, required this.store, required this.alarm});
+  const HistoryScreen({super.key, required this.store, required this.home});
 
   final Store store;
-  final RestAlarm alarm;
+  final Home home;
 
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
@@ -46,53 +42,49 @@ class _HistoryScreenState extends State<HistoryScreen> {
     _loadMore();
   }
 
+  /// Today pops back to the home screen, which already shows it. Any other day opens on a workout screen of its own; a day picked there comes back here and opens in turn.
   Future<void> _open(Day day) async {
-    await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => WorkoutScreen(store: widget.store, alarm: widget.alarm, day: day)));
-    if (mounted) _reload();
-  }
-
-  Future<void> _import() async {
-    final picked = await FilePicker.pickFiles(dialogTitle: 'FitNotes backup');
-    if (picked.isEmpty || !mounted) return;
-    final dbPath = widget.store.path!;
-    // The picker may hand back a content URI with no path, so the importer always reads a copy in the cache directory.
-    final copy = File('${(await getTemporaryDirectory()).path}/fitnotes-import.sqlite');
-    await copy.writeAsBytes(await picked.single.readAsBytes());
-    try {
-      final outcome = await importFitNotes(backupPath: copy.path, dbPath: dbPath);
-      if (!mounted) return;
-      _reload();
-      await _showOutcome(outcome);
-    } on FitNotesFormatError catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-    } finally {
-      await copy.delete();
+    if (day == widget.home.day) {
+      Navigator.pop(context);
+      return;
     }
+    final next = await Navigator.push<Day>(context, MaterialPageRoute(builder: (_) => WorkoutScreen(store: widget.store, home: widget.home, day: day)));
+    if (!mounted) return;
+    _reload();
+    if (next != null) _open(next);
   }
-
-  /// Sets written against training_log rows, skipped days, and what the reader left out, such as routines and superset groups.
-  Future<void> _showOutcome(ImportOutcome outcome) => throw UnimplementedError();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('History'), actions: [IconButton(onPressed: _import, icon: const Icon(Icons.upload_file), tooltip: 'Import FitNotes backup')]),
-      body: ListView.builder(
-        itemCount: _days.length + (_reachedEnd ? 0 : 1),
-        itemBuilder: (context, i) {
-          if (i == _days.length) {
-            WidgetsBinding.instance.addPostFrameCallback((_) => _loadMore());
-            return const Center(child: CircularProgressIndicator());
-          }
-          final w = _days[i];
-          return ListTile(
-            title: Text(w.day.iso), // TODO: weekday and date
-            subtitle: Text(w.slots.map((s) => s.exercise.name).join(', ')),
-            trailing: Text('${w.summary.doneSets} sets'),
-            onTap: () => _open(w.day),
-          );
-        },
-      ),
+      appBar: AppBar(title: const Text('History')),
+      body: _days.isEmpty && _reachedEnd
+          ? const Center(child: Text('No workouts yet'))
+          : ListView.builder(
+              itemCount: _days.length + (_reachedEnd ? 0 : 1),
+              itemBuilder: (context, i) {
+                if (i == _days.length) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) _loadMore();
+                  });
+                  return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()));
+                }
+                final w = _days[i];
+                final sets = w.summary.doneSets;
+                return ListTile(
+                  title: Text(dayLabel(w.day)),
+                  subtitle: Text(w.slots.isEmpty ? w.note : w.slots.map((s) => s.exercise.name).join(', '), maxLines: 2, overflow: TextOverflow.ellipsis),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(sets == 1 ? '1 set' : '$sets sets'),
+                      if (w.day != widget.home.day && w.slots.isNotEmpty) IconButton(icon: const Icon(Icons.content_copy), tooltip: 'Copy to today', onPressed: () => Navigator.pop(context, w)),
+                    ],
+                  ),
+                  onTap: () => _open(w.day),
+                );
+              },
+            ),
     );
   }
 }
