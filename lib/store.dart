@@ -116,7 +116,7 @@ final class Store {
     }
   }
 
-  /// Writes an importer's output. Safe to run any number of times. Each run converges on the same rows, and a failure at any point leaves the database as it was before the run. Throws [ArgumentError] for a slot with no sets or whose exercise key is not in [ImportBatch.exercises], and [StoreWriteFailed] when SQLite refuses a row.
+  /// Writes an importer's output. Safe to run any number of times. Each run converges on the same rows, and a failure at any point leaves the database as it was before the run. Throws [ArgumentError] for a day that appears twice, a slot with no sets, or a slot whose exercise key is not in [ImportBatch.exercises], and [StoreWriteFailed] when SQLite refuses a row.
   ///
   /// The batch's defaults, when given, replace the stored ones first. Ownership decides who writes a day. The importer writes a day only if the app has never saved it (no app_day row); those days it replaces wholesale, so a newer backup refreshes them. Days the app has saved are skipped and listed in [ImportReport.skippedDays]. Exercises are matched by import key, then by name ignoring case, then created; a matched exercise keeps the lifter's own name, increment and rest. A created exercise whose name is taken by one with another import key gets the source appended, as in `Squat (fitnotes)`.
   ImportReport importBatch(ImportBatch batch) {
@@ -136,7 +136,9 @@ final class Store {
         final skipped = <Day>[];
         var daysWritten = 0;
         var setsWritten = 0;
+        final seen = <Day>{};
         for (final d in batch.days) {
+          if (!seen.add(d.day)) throw ArgumentError.value(d.day.iso, 'days', 'an import batch holds each day at most once');
           if (_sql('SELECT 1 FROM app_day WHERE day = ?').select([d.day.iso]).isNotEmpty) {
             skipped.add(d.day);
             continue;

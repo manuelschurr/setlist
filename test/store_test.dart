@@ -245,6 +245,13 @@ void main() {
         expect(dump(path), before, reason: bad.exerciseKey);
       }
     });
+
+    test('a batch that holds one day twice writes nothing', () {
+      final before = dump(path);
+      final twice = ImportBatch(source: 'fitnotes', exercises: batch.exercises, days: [batch.days.first, batch.days.first]);
+      expect(() => store.importBatch(twice), throwsArgumentError);
+      expect(dump(path), before);
+    });
   });
 
   group('file', () {

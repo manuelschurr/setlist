@@ -31,7 +31,9 @@ class _SetlistAppState extends State<SetlistApp> with WidgetsBindingObserver {
 
   Home _newHome() => Home(day: Day.of(widget.clock()), alarm: widget.alarm, restore: _restore);
 
-  /// A process that lives through the night would otherwise show yesterday and log onto it. A set logged within the last 3 hours means a session that crossed midnight, which stays on its day.
+  /// A process that lives through the night would otherwise show yesterday and log onto it. A set logged within [_midnightSessionGrace] means a session that crossed midnight, which stays on its day.
+  static const _midnightSessionGrace = Duration(hours: 3);
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
@@ -40,7 +42,7 @@ class _SetlistAppState extends State<SetlistApp> with WidgetsBindingObserver {
     final recent = [
       for (final slot in _store.loadDay(_home.day).slots)
         for (final set in slot.sets)
-          if (set.status case Done(:final at?) when now.difference(at) < const Duration(hours: 3)) set,
+          if (set.status case Done(:final at?) when now.difference(at) < _midnightSessionGrace) set,
     ];
     if (recent.isEmpty) setState(() => _home = _newHome());
   }
