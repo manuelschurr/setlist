@@ -18,7 +18,7 @@ extension type const Day._(String iso) implements Object {
     throw FormatException('not a calendar day in the form YYYY-MM-DD', text);
   }
 
-  /// The local calendar day of [time]. A session that runs past midnight stays on the day its screen opened, because the screen holds its [Day] and never asks the clock again.
+  /// The local calendar day of [time]. A session that runs past midnight stays on the day its screen opened, because the screen holds its [Day] and never asks the clock again. The app moves the home to a new day on resume only when no set was logged in the last 3 hours (see main.dart).
   factory Day.of(DateTime time) {
     final local = time.toLocal();
     return Day._('${local.year.toString().padLeft(4, '0')}-${_twoDigits(local.month)}-${_twoDigits(local.day)}');
@@ -277,9 +277,9 @@ final class Workout {
 
   /// The rest countdown at [now], derived from the log times, never stored. Undo, app restarts and edits during rest therefore need no timer state.
   ///
-  /// It runs from the latest log time plus that set's exercise rest, and is null once it has ended, on any day but [now]'s (logging on a past day starts no countdown), and when no planned set remains (the panel shows the summary instead).
+  /// It runs from the latest log time plus that set's exercise rest, whatever the calendar day of [now], so a rest that spans midnight keeps counting. It is null once it has ended and when no planned set remains (the panel shows the summary instead).
   Rest? restAt(DateTime now) {
-    if (Day.of(now) != day || _firstPlanned(this) == null) return null;
+    if (_firstPlanned(this) == null) return null;
     ({DateTime at, Exercise exercise})? latest;
     for (final slot in slots) {
       for (final set in slot.sets) {

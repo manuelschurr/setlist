@@ -136,6 +136,42 @@ void main() {
     expect(alarm.shown.last, isNull);
   });
 
+  /// Opens yesterday over the home and logs its first set there, which offers Undo.
+  Future<Day> logOnYesterday(WidgetTester tester) async {
+    final past = daysAgo(1);
+    store.saveDay(Workout(day: past, slots: [Slot(squat, sets(2, 100, 5))]));
+    await openToday(tester);
+    final home = tester.widget<WorkoutScreen>(find.byType(WorkoutScreen)).home;
+    tester.state<NavigatorState>(find.byType(Navigator)).push(MaterialPageRoute<void>(builder: (_) => WorkoutScreen(store: store, home: home, day: past)));
+    await tester.pumpAndSettle();
+    await tester.tap(inPanel(find.text('Log set')));
+    await tester.pumpAndSettle();
+    expect(find.text('Set logged'), findsOneWidget);
+    return past;
+  }
+
+  testWidgets('leaving a past day takes its Undo snackbar with it', (tester) async {
+    final past = await logOnYesterday(tester);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(WorkoutScreen, skipOffstage: false), findsOneWidget);
+    expect(find.text('Set logged'), findsNothing);
+    expect(store.loadDay(past).slotOf(squat.id)!.sets.first.isDone, isTrue);
+  });
+
+  testWidgets('a tap on Undo while it leaves with its past day changes nothing', (tester) async {
+    final past = await logOnYesterday(tester);
+    await tester.pageBack();
+    for (var i = 0; i < 100 && find.byType(WorkoutScreen, skipOffstage: false).evaluate().length > 1; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(find.byType(WorkoutScreen, skipOffstage: false), findsOneWidget);
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(store.loadDay(past).slotOf(squat.id)!.sets.first.isDone, isTrue);
+  });
+
   testWidgets('dragging a card by its handle moves it in one gesture', (tester) async {
     final row = store.createExercise(name: 'Row', kind: ExerciseKind.weightReps);
     store.saveDay(Workout(day: today, slots: [Slot(squat, sets(3, 100, 5)), Slot(bench, sets(3, 80, 8)), Slot(row, sets(3, 60, 10))]));

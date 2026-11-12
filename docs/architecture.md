@@ -42,4 +42,4 @@ Every implementer checks these off. They come from the judge's defect list, `doc
 | `lib/history_screen.dart` | Paged past days, copy to today, and the data menu. |
 | `lib/exercise_picker.dart` | `pickExercise` and the create-exercise dialog. |
 | `lib/exercise_history_screen.dart` | One exercise's past sessions with the best estimated one-rep max per session. |
-| `lib/main.dart` | Opens the database and shows today. |
+| `lib/main.dart` | Opens the database and shows today, and starts over on today when the app resumes on a later day with no set logged in the last 3 hours. |

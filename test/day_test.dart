@@ -404,9 +404,16 @@ void main() {
       expect(s.workout.restAt(at.add(const Duration(seconds: 90))), isNull);
     });
 
-    test('nothing counts down on another day, before any log, after an import without times, or when nothing is planned', () {
+    test('a rest that spans midnight keeps counting into the next day', () {
+      final lateNight = DateTime(2026, 11, 12, 23, 59);
+      final logged = reduce(open([Slot(squat, [kg(100, 5), kg(100, 5)])]), LogSet(ref(squat, 0), at: lateNight));
+      final rest = logged.workout.restAt(DateTime(2026, 11, 13, 0, 0, 30));
+      expect(rest?.exercise, squat);
+      expect(rest?.endsAt, lateNight.add(squat.rest));
+    });
+
+    test('nothing counts down before any log, after an import without times, or when nothing is planned', () {
       final logged = reduce(open([Slot(squat, [kg(100, 5), kg(100, 5)])]), LogSet(ref(squat, 0), at: at));
-      expect(logged.workout.restAt(at.add(const Duration(days: 1))), isNull);
       expect(open([Slot(squat, [kg(100, 5)])]).workout.restAt(at), isNull);
       expect(open([Slot(squat, [const SetEntry(status: Done()), kg(100, 5)])]).workout.restAt(at), isNull);
       final finished = reduce(logged, LogSet(ref(squat, 1), at: at));
