@@ -41,6 +41,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
   /// The state before the last change that offered undo. Cleared by the next change to the workout, so the snackbar's Undo never reverts anything but the change it names. Focus taps keep it, since restoring would only move the focus back.
   DayState? _undoTo;
 
+  /// The root messenger, kept so [dispose] can reach it after this screen's context is gone. The snackbar it shows outlives the screen and would follow the lifter to the home.
+  late ScaffoldMessengerState _messenger;
+
+  /// The Undo snackbar this screen showed, until it closes.
+  ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _undoBar;
+
   /// The last save threw. The next change, the app going to the background, or the banner's Retry saves the whole day again, which converges because the save is a replace.
   bool _unsaved = false;
 
@@ -76,9 +82,12 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
       _persist(after.workout);
       final label = _undoLabel(command);
       _undoTo = label == null ? null : before;
-      final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
+      _messenger.hideCurrentSnackBar();
       if (label != null) {
-        messenger.showSnackBar(SnackBar(content: Text(label), persist: false, action: SnackBarAction(label: 'Undo', onPressed: _undo)));
+        final bar = _undoBar = _messenger.showSnackBar(SnackBar(content: Text(label), persist: false, action: SnackBarAction(label: 'Undo', onPressed: _undo)));
+        bar.closed.then((_) {
+          if (_undoBar == bar) _undoBar = null;
+        });
       }
     }
     if (focus != null && focus != before.focus?.exercise) _reveal(focus);
@@ -86,7 +95,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
 
   void _undo() {
     final to = _undoTo;
-    if (to == null) return;
+    if (to == null || !mounted) return;
     _undoTo = null;
     setState(() => _state = to);
     _persist(to.workout);
@@ -240,8 +249,16 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _messenger = ScaffoldMessenger.of(context);
+  }
+
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // Clears the queue too, because the bar may still wait behind the one it replaced while that one animates out.
+    if (_undoBar != null) _messenger.clearSnackBars();
     super.dispose();
   }
 
