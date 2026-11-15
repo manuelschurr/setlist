@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -7,7 +8,7 @@ import 'package:setlist/day.dart';
 import 'package:setlist/drive_backup.dart';
 import 'package:setlist/store.dart';
 
-/// The Drive app's document provider as the Android side of `de.schurr.setlist/documents` presents it: files by URI, a picker that creates one, and permissions to release.
+/// The Drive app's document provider as the Android side of `de.schurr.setlist/documents` presents it: a folder picker, documents created in a folder by name (duplicates allowed, as on Drive), files by URI, a file picker that copies, and permissions to release.
 final class FakeProvider {
   FakeProvider() {
     _messenger.setMockMethodCallHandler(_channel, _handle);
@@ -16,12 +17,38 @@ final class FakeProvider {
   static const _channel = MethodChannel('de.schurr.setlist/documents');
   static TestDefaultBinaryMessenger get _messenger => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
 
+  static const backups = (uri: 'content://com.google.android.apps.docs.storage/tree/acc%3D1%3Bdoc%3Dbackups', name: 'Setlist backups');
+
   final files = <String, Uint8List>{};
   final writtenTo = <String>[];
   final released = <String>[];
 
+  /// The names of the documents created in a folder, in order.
+  final created = <String>[];
+
+  /// The names Setlist asked to create, including the ones refused.
+  final askedToCreate = <String>[];
+
+  /// What the pickers were opened near.
+  final nearSeen = <String?>[];
+
+  /// The folder the folder picker hands back, or null when the lifter cancels.
+  DriveDoc? folder = backups;
+
+  /// The file the file picker hands back, or null when the lifter cancels.
+  Uint8List? pickNext;
+
   /// Every write fails with this while set, as when the lifter revoked the permission.
   PlatformException? refuse;
+
+  /// Writes to these URIs fail, as when the lifter deleted, moved or binned the file in Drive.
+  final unwritable = <String>{};
+
+  /// Every create in a folder fails while set.
+  bool failCopy = false;
+
+  /// While set, the backup folder is in the Drive bin, and Documents.kt refuses every write into it.
+  bool binned = false;
 
   /// While set, the picker stays open until it completes.
   Completer<void>? picking;
@@ -44,20 +71,40 @@ final class FakeProvider {
     }
   }
 
+  static bool _inTree(String uri) => uri.contains('/tree/');
+
   Future<Object?> _handle(MethodCall call) async {
     final args = (call.arguments as Map).cast<String, String>();
     switch (call.method) {
-      case 'create':
+      case 'openFolder':
+        nearSeen.add(args['near']);
         await picking?.future;
-        final uri = 'content://com.google.android.apps.docs.storage/document/${files.length + 1}';
-        files[uri] = Uint8List(0);
+        if (folder case final folder?) return {'uri': folder.uri, 'name': folder.name};
+        return null;
+      case 'copyInto':
+        askedToCreate.add(args['name']!);
+        if (binned) throw PlatformException(code: 'binned', message: 'the backup folder is in the Drive bin');
+        if (failCopy) throw PlatformException(code: 'failed', message: 'java.io.IOException: no network');
+        final uri = '${args['folder']}/document/${files.length + 1}';
+        created.add(args['name']!);
+        files[uri] = File(args['path']!).readAsBytesSync();
         return {'uri': uri, 'name': args['name']};
       case 'write':
-        writtenTo.add(args['uri']!);
+        final uri = args['uri']!;
+        writtenTo.add(uri);
         if (refuse case final e?) throw e;
-        files[args['uri']!] = File(args['path']!).readAsBytesSync();
+        if (binned && _inTree(uri)) throw PlatformException(code: 'binned', message: 'the backup folder is in the Drive bin');
+        if (unwritable.contains(uri)) throw PlatformException(code: 'failed', message: 'java.io.FileNotFoundException: Cannot write trashed document');
+        files[uri] = File(args['path']!).readAsBytesSync();
       case 'read':
         File(args['path']!).writeAsBytesSync(files[args['uri']!]!);
+      case 'pickCopy':
+        nearSeen.add(args['near']);
+        if (pickNext case final bytes?) {
+          File(args['path']!).writeAsBytesSync(bytes);
+          return true;
+        }
+        return false;
       case 'release':
         released.add(args['uri']!);
     }
@@ -76,9 +123,19 @@ void main() {
   late Store store;
   late FakeProvider provider;
   late Exercise squat;
+  late DateTime now;
 
-  void logSets(int count) => store.saveDay(Workout(day: today, entries: [Slot(squat, [for (var i = 0; i < count; i++) SetEntry(grams: 100000, reps: 5, status: Done(DateTime.now()))])]));
-  DriveBackup open() => DriveBackup(dbPath: path, store: () => store);
+  void logSets(int count) {
+    store.saveDay(Workout(day: today, entries: [Slot(squat, [for (var i = 0; i < count; i++) SetEntry(grams: 100000, reps: 5, status: Done(DateTime.now()))])]));
+    nextMillisecond();
+  }
+
+  DriveBackup open() => DriveBackup(dbPath: path, store: () => store, clock: () => now);
+  FolderLink folderLink(DriveBackup backup) => backup.link! as FolderLink;
+  WeekFile latest(DriveBackup backup) => folderLink(backup).latest!;
+
+  void writeState(Map<String, Object?> json) => File('$path.drive-backup.json').writeAsStringSync(jsonEncode(json));
+  const oldFile = 'content://com.google.android.apps.docs.storage/document/acc%3D1%3Bdoc%3Dold';
 
   setUp(() {
     final dir = Directory.systemTemp.createTempSync('setlist_drive_');
@@ -89,112 +146,294 @@ void main() {
     provider = FakeProvider();
     addTearDown(provider.dispose);
     squat = store.createExercise(name: 'Squat', kind: ExerciseKind.weightReps);
+    now = DateTime(2026, 11, 11, 18);
     logSets(1);
-    nextMillisecond();
   });
 
-  test('does nothing while no file is linked', () async {
+  test('a week starts on the Monday on or before the local date', () {
+    expect(Week.of(DateTime(2026, 11, 9)).fileName, 'Setlist week of 2026-11-09.sqlite');
+    expect(Week.of(DateTime(2026, 11, 15, 23, 59)).fileName, 'Setlist week of 2026-11-09.sqlite');
+    expect(Week.of(DateTime(2026, 11, 16)).fileName, 'Setlist week of 2026-11-16.sqlite');
+    expect(Week.of(DateTime(2026, 1, 1, 12)).fileName, 'Setlist week of 2025-12-29.sqlite');
+    expect(Week.of(DateTime(2026, 3, 29, 12)), Week.of(DateTime(2026, 3, 23)), reason: 'the Sunday clocks go forward in Europe stays in its week');
+    expect(Week.parse('2026-11-09'), Week.of(DateTime(2026, 11, 12)));
+    expect(() => Week.parse('2026-11-10'), throwsFormatException);
+  });
+
+  test('does nothing while nothing is linked', () async {
     final backup = open();
     await backup.backUpIfChanged();
     expect(backup.link, isNull);
     expect(provider.writtenTo, isEmpty);
+    expect(provider.created, isEmpty);
   });
 
-  test('linking backs up at once, and leaving the app backs up again only after the database changed', () async {
+  test('linking a folder backs up at once into a file named for this week', () async {
     final backup = open();
-    expect(await backup.linkNewFile(), isTrue);
-    final uri = backup.link!.uri;
-    expect(backup.link!.name, DriveBackup.suggestedName);
-    expect(provider.setsIn(uri, today), hasLength(1));
+    expect(await backup.linkFolder(), isTrue);
+    expect(provider.created, ['Setlist week of 2026-11-09.sqlite']);
+    expect(folderLink(backup).folder, FakeProvider.backups);
+    expect(latest(backup).doc.name, 'Setlist week of 2026-11-09.sqlite');
+    expect(provider.setsIn(latest(backup).doc.uri, today), hasLength(1));
+    expect(backup.link!.lastError, isNull);
+  });
+
+  test('cancelling the folder picker links nothing', () async {
+    provider.folder = null;
+    final backup = open();
+    expect(await backup.linkFolder(), isFalse);
+    expect(backup.link, isNull);
+    expect(provider.created, isEmpty);
+  });
+
+  test('a change in the same week overwrites that week\'s file, and no change writes nothing', () async {
+    final backup = open();
+    await backup.linkFolder();
+    final week = latest(backup).doc.uri;
     final first = backup.link!.lastSuccess!;
 
-    nextMillisecond();
     await backup.backUpIfChanged();
-    expect(provider.writtenTo, [uri]);
+    expect(provider.writtenTo, isEmpty, reason: 'no change since the backup');
 
     logSets(2);
-    nextMillisecond();
+    now = DateTime(2026, 11, 15, 23, 59);
     await backup.backUpIfChanged();
-    expect(provider.writtenTo, [uri, uri]);
-    expect(provider.setsIn(uri, today), hasLength(2));
+    expect(provider.writtenTo, [week]);
+    expect(provider.created, hasLength(1));
+    expect(provider.setsIn(week, today), hasLength(2));
     expect(backup.link!.lastSuccess!.isAfter(first), isTrue);
 
-    nextMillisecond();
     await backup.backUpIfChanged();
-    expect(provider.writtenTo, [uri, uri]);
+    expect(provider.writtenTo, [week]);
   });
 
-  test('the link and its last backup survive a restart', () async {
-    final before = open();
-    await before.linkNewFile();
-    nextMillisecond();
-
-    final after = open();
-    expect(after.link?.uri, before.link!.uri);
-    expect(after.link?.lastSuccess, before.link!.lastSuccess);
-    await after.backUpIfChanged();
-    expect(provider.writtenTo, hasLength(1));
-  });
-
-  test('a revoked permission is recorded as an error that keeps the last backup, and the next backup retries and clears it', () async {
+  test('a change in a later week creates that week\'s file and leaves the earlier file alone', () async {
     final backup = open();
-    await backup.linkNewFile();
-    final uri = backup.link!.uri;
-    final success = backup.link!.lastSuccess;
-    provider.refuse = PlatformException(code: 'denied', message: 'java.lang.SecurityException: No persistable permission grants found');
-    logSets(2);
-    nextMillisecond();
+    await backup.linkFolder();
+    final earlier = latest(backup).doc.uri;
+    final earlierBytes = provider.files[earlier];
 
+    now = DateTime(2026, 11, 16, 7);
     await backup.backUpIfChanged();
-    expect(backup.link!.lastError?.message, contains('Change file'));
-    expect(backup.link!.lastSuccess, success);
+    expect(provider.created, hasLength(1), reason: 'a new week with no change makes no file');
+
+    logSets(2);
+    await backup.backUpIfChanged();
+    expect(provider.created, ['Setlist week of 2026-11-09.sqlite', 'Setlist week of 2026-11-16.sqlite']);
+    expect(latest(backup).doc.name, 'Setlist week of 2026-11-16.sqlite');
+    expect(provider.setsIn(latest(backup).doc.uri, today), hasLength(2));
+    expect(provider.files[earlier], earlierBytes);
+    expect(provider.writtenTo, isEmpty);
+
+    logSets(3);
+    await backup.backUpIfChanged();
+    expect(provider.writtenTo, [latest(backup).doc.uri]);
+    expect(provider.files[earlier], earlierBytes);
+  });
+
+  test('a write to this week\'s file that fails gets a new file for the week in the same run', () async {
+    final backup = open();
+    await backup.linkFolder();
+    final gone = latest(backup).doc.uri;
+    provider.unwritable.add(gone);
+
+    logSets(2);
+    await backup.backUpIfChanged();
+    expect(provider.created, ['Setlist week of 2026-11-09.sqlite', 'Setlist week of 2026-11-09.sqlite']);
+    expect(latest(backup).doc.uri, isNot(gone));
+    expect(provider.setsIn(latest(backup).doc.uri, today), hasLength(2));
+    expect(backup.link!.lastError, isNull);
+
+    logSets(3);
+    await backup.backUpIfChanged();
+    expect(provider.created, hasLength(2), reason: 'later backups go to the new file');
+    expect(provider.setsIn(latest(backup).doc.uri, today), hasLength(3));
+  });
+
+  test('a lost grant is recorded with the latest backup kept and creates nothing, and the next backup retries and clears it', () async {
+    final backup = open();
+    await backup.linkFolder();
+    final before = latest(backup);
+    provider.refuse = PlatformException(code: 'denied', message: 'java.lang.SecurityException: No persistable permission grants found');
+
+    logSets(2);
+    await backup.backUpIfChanged();
+    expect(backup.link!.lastError?.message, 'Setlist lost access to the backup folder. Choose it again with Change folder.');
+    expect(latest(backup), before);
+    expect(provider.created, hasLength(1));
     expect(open().link!.lastError, isNotNull);
-    expect(provider.setsIn(uri, today), hasLength(1));
 
     provider.refuse = null;
     await backup.backUpIfChanged();
-    expect(provider.writtenTo, [uri, uri, uri]);
     expect(backup.link!.lastError, isNull);
-    expect(provider.setsIn(uri, today), hasLength(2));
+    expect(provider.setsIn(before.doc.uri, today), hasLength(2));
   });
 
-  test('stopping releases the permission, forgets the file, and backs up nothing more', () async {
+  test('a folder in the Drive bin is recorded as such, and neither this week\'s file nor a new one is written', () async {
     final backup = open();
-    await backup.linkNewFile();
-    final uri = backup.link!.uri;
+    await backup.linkFolder();
+    final before = latest(backup);
+    final bytes = provider.files[before.doc.uri];
+    provider.binned = true;
+
+    logSets(2);
+    await backup.backUpIfChanged();
+    expect(backup.link!.lastError?.message, 'The backup folder is in the Drive bin. Restore it in Drive, or choose another folder with Change folder.');
+    expect(provider.askedToCreate, hasLength(1), reason: 'a binned folder gets no new file for the week either');
+    expect(provider.files[before.doc.uri], bytes);
+    expect(latest(backup), before);
+
+    now = DateTime(2026, 11, 16, 7);
+    await backup.backUpIfChanged();
+    expect(provider.created, hasLength(1));
+    expect(backup.link!.lastError?.message, contains('Drive bin'));
+  });
+
+  test('a failed create is recorded and keeps the latest backup', () async {
+    final backup = open();
+    await backup.linkFolder();
+    final before = latest(backup);
+    provider.failCopy = true;
+
+    now = DateTime(2026, 11, 16, 7);
+    logSets(2);
+    await backup.backUpIfChanged();
+    expect(backup.link!.lastError?.message, 'Drive could not be reached (java.io.IOException: no network).');
+    expect(latest(backup), before);
+
+    provider.failCopy = false;
+    await backup.backUpIfChanged();
+    expect(latest(backup).doc.name, 'Setlist week of 2026-11-16.sqlite');
+    expect(backup.link!.lastError, isNull);
+  });
+
+  test('restoring latest copies the newest week\'s file next to the database', () async {
+    final backup = open();
+    await backup.linkFolder();
+    now = DateTime(2026, 11, 16, 7);
+    logSets(2);
+    await backup.backUpIfChanged();
+
+    final copy = await backup.fetch();
+    expect(File(copy).readAsBytesSync(), provider.files[latest(backup).doc.uri]);
+    expect(provider.files[latest(backup).doc.uri], isNot(provider.files.values.first));
+  });
+
+  test('the link and its latest backup survive a restart', () async {
+    final before = open();
+    await before.linkFolder();
+
+    final after = open();
+    expect(folderLink(after).folder, FakeProvider.backups);
+    expect(latest(after), latest(before));
+    await after.backUpIfChanged();
+    logSets(2);
+    await after.backUpIfChanged();
+    expect(provider.writtenTo, [latest(before).doc.uri]);
+    expect(provider.created, hasLength(1));
+  });
+
+  test('a phone upgraded from 0.2 keeps backing up to its file until a folder is chosen, which releases that file', () async {
+    final last = DateTime.now().subtract(const Duration(days: 1));
+    provider.files[oldFile] = Uint8List(0);
+    writeState({'uri': oldFile, 'name': 'Setlist backup.sqlite', 'lastSuccessMs': last.millisecondsSinceEpoch});
+    final backup = open();
+    expect(backup.link, isA<OldFileLink>());
+    expect(backup.link!.lastSuccess, DateTime.fromMillisecondsSinceEpoch(last.millisecondsSinceEpoch));
+
+    await backup.backUpIfChanged();
+    expect(provider.writtenTo, [oldFile]);
+    expect(provider.created, isEmpty);
+    expect(provider.setsIn(oldFile, today), hasLength(1));
+    expect(open().link, isA<OldFileLink>());
+
+    expect(await backup.linkFolder(), isTrue);
+    expect(provider.nearSeen, [oldFile]);
+    expect(provider.released, [oldFile]);
+    expect(latest(backup).doc.name, 'Setlist week of 2026-11-09.sqlite');
+    expect(provider.files, contains(oldFile));
+  });
+
+  test('picking the folder already linked keeps its week file, and another folder releases the first', () async {
+    final backup = open();
+    await backup.linkFolder();
+    final week = latest(backup).doc.uri;
+
+    expect(await backup.linkFolder(), isTrue);
+    expect(provider.nearSeen.last, FakeProvider.backups.uri);
+    expect(provider.created, hasLength(1));
+    expect(provider.writtenTo, [week]);
+    expect(provider.released, isEmpty);
+
+    provider.folder = (uri: 'content://com.google.android.apps.docs.storage/tree/acc%3D1%3Bdoc%3Dother', name: 'Other');
+    await backup.linkFolder();
+    expect(provider.released, [FakeProvider.backups.uri]);
+    expect(folderLink(backup).folder.name, 'Other');
+    expect(provider.created, hasLength(2));
+    expect(latest(backup).doc.uri, startsWith(provider.folder!.uri));
+  });
+
+  test('a last backup that claims a time still to come backs up, as after the clock was set back', () async {
+    final backup = open();
+    await backup.linkFolder();
+    final week = latest(backup);
+    writeState({
+      'folder': {'uri': FakeProvider.backups.uri, 'name': FakeProvider.backups.name},
+      'latest': {'week': '2026-11-09', 'uri': week.doc.uri, 'name': week.doc.name, 'atMs': DateTime.now().add(const Duration(days: 1)).millisecondsSinceEpoch},
+    });
+
+    final reopened = open();
+    await reopened.backUpIfChanged();
+    expect(provider.writtenTo, [week.doc.uri]);
+    expect(reopened.link!.lastSuccess!.isAfter(DateTime.now()), isFalse);
+  });
+
+  test('stopping releases the folder, forgets it, and backs up nothing more', () async {
+    final backup = open();
+    await backup.linkFolder();
 
     await backup.unlink();
-    expect(provider.released, [uri]);
+    expect(provider.released, [FakeProvider.backups.uri]);
     expect(backup.link, isNull);
     expect(open().link, isNull);
 
     logSets(2);
-    nextMillisecond();
     await backup.backUpIfChanged();
-    expect(provider.writtenTo, [uri]);
+    expect(provider.writtenTo, isEmpty);
+    expect(provider.created, hasLength(1));
   });
 
-  test('a backup asked for while the picker is open for a new file waits, and goes to the new file', () async {
+  test('picking a file to restore opens in the backup folder, copies it next to the database, and a cancel copies nothing', () async {
     final backup = open();
-    await backup.linkNewFile();
-    final old = backup.link!.uri;
+    expect(await backup.pickCopy(), isNull);
+    expect(provider.nearSeen, [null]);
+
+    await backup.linkFolder();
+    provider.pickNext = Uint8List.fromList([1, 2, 3]);
+    final copy = await backup.pickCopy();
+    expect(File(copy!).readAsBytesSync(), [1, 2, 3]);
+    expect(provider.nearSeen.last, FakeProvider.backups.uri);
+  });
+
+  test('a backup asked for while the folder picker is open waits, and goes to the folder picked', () async {
+    final backup = open();
+    await backup.linkFolder();
     logSets(2);
-    nextMillisecond();
 
     provider.picking = Completer();
-    final changing = backup.linkNewFile();
+    provider.folder = (uri: 'content://com.google.android.apps.docs.storage/tree/acc%3D1%3Bdoc%3Dother', name: 'Other');
+    final changing = backup.linkFolder();
     final leaving = backup.backUpIfChanged();
     await pumpEventQueue();
-    expect(provider.writtenTo, [old]);
+    expect(provider.created, hasLength(1));
 
     provider.picking!.complete();
     await changing;
     await leaving;
-    final now = backup.link!.uri;
-    expect(now, isNot(old));
-    expect(provider.released, [old]);
-    expect(provider.writtenTo.skip(1), everyElement(now));
-    expect(provider.setsIn(now, today), hasLength(2));
-    expect(open().link?.uri, now);
+    expect(provider.released, [FakeProvider.backups.uri]);
+    expect(latest(backup).doc.uri, startsWith(provider.folder!.uri));
+    expect(provider.setsIn(latest(backup).doc.uri, today), hasLength(2));
+    expect(provider.writtenTo, isEmpty);
+    expect(folderLink(open()).folder.name, 'Other');
   });
 }

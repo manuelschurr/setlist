@@ -29,7 +29,7 @@ class SetlistApp extends StatefulWidget {
 
 class _SetlistAppState extends State<SetlistApp> with WidgetsBindingObserver {
   late Store _store = Store.open(widget.dbPath);
-  late final _backup = DriveBackup(dbPath: widget.dbPath, store: () => _store);
+  late final _backup = DriveBackup(dbPath: widget.dbPath, store: () => _store, clock: widget.clock);
   late Home _home = _newHome();
   final _messenger = GlobalKey<ScaffoldMessengerState>();
 

@@ -78,23 +78,25 @@ void main() {
     expect(find.text('Add exercise'), findsOneWidget);
   });
 
-  testWidgets('leaving the app backs up a changed database to the linked file, and an unchanged one not again', (tester) async {
+  testWidgets('leaving the app backs up a changed database to this week\'s file on the app clock, and an unchanged one not again', (tester) async {
     final dir = Directory.systemTemp.createTempSync('setlist_app_');
     addTearDown(() => dir.deleteSync(recursive: true));
     final provider = FakeProvider();
     addTearDown(provider.dispose);
     final path = '${dir.path}/setlist.sqlite';
-    final today = Day.of(DateTime.now());
+    DateTime clock() => DateTime(2026, 3, 11, 18);
+    final today = Day.of(clock());
     final seed = Store.open(path);
     final squat = seed.createExercise(name: 'Squat', kind: ExerciseKind.weightReps);
     seed.saveDay(Workout(day: today, entries: [Slot(squat, const [SetEntry(grams: 100000, reps: 5)])]));
     nextMillisecond();
-    await DriveBackup(dbPath: path, store: () => seed).linkNewFile();
+    final linking = DriveBackup(dbPath: path, store: () => seed, clock: clock);
+    await linking.linkFolder();
     seed.close();
-    final uri = provider.writtenTo.single;
+    final uri = (linking.link! as FolderLink).latest!.doc.uri;
     nextMillisecond();
 
-    await tester.pumpWidget(SetlistApp(dbPath: path, alarm: FakeAlarm()));
+    await tester.pumpWidget(SetlistApp(dbPath: path, alarm: FakeAlarm(), clock: clock));
     Future<void> leaveAndReturn() async {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       await tester.pumpAndSettle();
@@ -106,11 +108,12 @@ void main() {
     await tester.pumpAndSettle();
     nextMillisecond();
     await leaveAndReturn();
-    expect(provider.writtenTo, [uri, uri]);
+    expect(provider.writtenTo, [uri]);
+    expect(provider.created, hasLength(1));
     expect(provider.setsIn(uri, today).single.isDone, isTrue);
 
     nextMillisecond();
     await leaveAndReturn();
-    expect(provider.writtenTo, [uri, uri]);
+    expect(provider.writtenTo, [uri]);
   });
 }

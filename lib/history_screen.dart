@@ -135,9 +135,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
-  Future<void> _restore() async {
-    await _withPickedCopy('Setlist backup', 'setlist-restore.sqlite', (copy) => widget.home.confirmRestore(context, copy.path));
-  }
+  /// Through the documents channel rather than file_picker, whose Android picker cannot open in the backup folder, where the earlier weeks are.
+  Future<void> _restore() => restoreFromCopy(context, widget.home, widget.home.backup.pickCopy);
 
   @override
   Widget build(BuildContext context) {
