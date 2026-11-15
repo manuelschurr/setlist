@@ -91,6 +91,7 @@ final class FakeProvider {
         File(args['path']!).writeAsBytesSync(files[args['uri']!]!);
       case 'pickCopy':
         nearSeen.add(args['near']);
+        await picking?.future;
         if (pickNext case final bytes?) {
           File(args['path']!).writeAsBytesSync(bytes);
           return true;
@@ -421,6 +422,26 @@ void main() {
     final copy = await backup.pickCopy();
     expect(File(copy!).readAsBytesSync(), [1, 2, 3]);
     expect(provider.nearSeen.last, FakeProvider.backups.uri);
+  });
+
+  test('leaving the app while the restore picker is open backs up nothing, so the state about to be replaced never reaches this week\'s file', () async {
+    final backup = open();
+    await backup.linkFolder();
+    logSets(2);
+
+    provider.picking = Completer();
+    provider.pickNext = Uint8List.fromList([1, 2, 3]);
+    final picking = backup.pickCopy();
+    await pumpEventQueue();
+    final leaving = backup.backUpIfChanged();
+    provider.picking!.complete();
+    await picking;
+    await leaving;
+    expect(provider.writtenTo, isEmpty);
+    expect(provider.setsIn(latest(backup).doc.uri, today), hasLength(1));
+
+    await backup.backUpIfChanged();
+    expect(provider.writtenTo, [latest(backup).doc.uri], reason: 'after the picker closes, leaving the app backs up again');
   });
 
   test('a backup asked for while the folder picker is open waits, and goes to the folder picked', () async {

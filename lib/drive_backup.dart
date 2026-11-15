@@ -109,6 +109,7 @@ final class DriveBackup extends ChangeNotifier {
   bool get busy => _waiting > 0;
   int _waiting = 0;
   Future<void> _tail = Future.value();
+  bool _pickingCopy = false;
 
   /// Opens the system folder picker, links the picked folder in place of any link before it, and backs up into it at once. Picking the folder already linked keeps its latest backup. Returns false when the lifter cancels. Throws [BackupUnreachable] when the provider refuses a lasting permission.
   Future<bool> linkFolder() => _serial(() async {
@@ -133,13 +134,17 @@ final class DriveBackup extends ChangeNotifier {
   });
 
   /// Backs up when the database changed since the last backup that reached Drive, or when that backup claims a time still to come, as after the clock was set back. Does nothing while unlinked. A failure lands in [BackupLink.lastError] instead of throwing.
-  Future<void> backUpIfChanged() => _serial(() async {
-    final link = _link;
-    if (link == null) return;
-    final success = link.lastSuccess;
-    if (success != null && _lastWrite().isBefore(success) && !success.isAfter(DateTime.now())) return;
-    await _backUp();
-  });
+  Future<void> backUpIfChanged() {
+    // The restore picker sends the app to the background, and a backup then would put the state about to be replaced over this week's file. After a cancel, the next time the app leaves backs it up.
+    if (_pickingCopy) return Future.value();
+    return _serial(() async {
+      final link = _link;
+      if (link == null) return;
+      final success = link.lastSuccess;
+      if (success != null && _lastWrite().isBefore(success) && !success.isAfter(DateTime.now())) return;
+      await _backUp();
+    });
+  }
 
   Future<void> backUpNow() => _serial(_backUp);
 
@@ -164,10 +169,13 @@ final class DriveBackup extends ChangeNotifier {
   Future<String?> pickCopy() => _serial(() async {
     final copy = '$_dbPath.drive-restore';
     final Object? picked;
+    _pickingCopy = true;
     try {
       picked = await _call('pickCopy', {'path': copy, if (_link case FolderLink(:final folder)) 'near': folder.uri});
     } on _Refused catch (r) {
       throw BackupUnreachable('Setlist could not read that file (${r.detail}).');
+    } finally {
+      _pickingCopy = false;
     }
     return picked == true ? copy : null;
   });
