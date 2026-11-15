@@ -350,4 +350,89 @@ void main() {
       expect(handle(name), findsOneWidget);
     }
   });
+
+  /// Picks up the row at [handle], then moves it by [dy] in small steps and lets go. [dy] is asked for once the row floats, so it measures from the floating copy and reads the list as the drag left it.
+  Future<void> drag(WidgetTester tester, Finder handle, double Function() dy, {void Function()? whileHeld}) async {
+    await tester.ensureVisible(handle);
+    await tester.pumpAndSettle();
+    final gesture = await tester.startGesture(tester.getCenter(handle));
+    for (var i = 0; i < 3; i++) {
+      await gesture.moveBy(const Offset(0, 8));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    final total = dy();
+    final steps = (total.abs() / 10).ceil();
+    for (var i = 0; i < steps; i++) {
+      await gesture.moveBy(Offset(0, total / steps));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await tester.pump(const Duration(milliseconds: 300));
+    whileHeld?.call();
+    await gesture.up();
+    await tester.pumpAndSettle();
+  }
+
+  List<List<String>> savedLayout() => [
+    for (final entry in store.loadDay(today).entries) [for (final slot in entry.slots) slot.exercise.name],
+  ];
+
+  testWidgets('dragging a card by its handle into a superset frame, within it and out of it regroups the day', (tester) async {
+    final curl = store.createExercise(name: 'Curl', kind: ExerciseKind.weightReps);
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 100, 5, done: true)), Superset([Slot(bench, sets(1, 80, 8, done: true)), Slot(row, sets(1, 60, 10, done: true))]), Slot(curl, sets(1, 20, 12))]));
+    await openToday(tester);
+    Rect at(String name) => tester.getRect(card(name, skipOffstage: false));
+
+    await drag(tester, handle('Squat'), () => (at('Bench press').bottom + at('Row').top) / 2 - at('Squat').bottom);
+    expect(savedLayout(), [['Bench press', 'Squat', 'Row'], ['Curl']]);
+    expect(cardOrder(tester, ['Squat', 'Bench press', 'Row', 'Curl']), ['Bench press', 'Squat', 'Row', 'Curl']);
+    expect(at('Squat').left, at('Bench press').left, reason: 'the dropped card is framed like the others');
+
+    await drag(tester, handle('Row'), () => at('Bench press').top - at('Row').top);
+    expect(savedLayout(), [['Row', 'Bench press', 'Squat'], ['Curl']]);
+
+    await drag(tester, handle('Squat'), () => at('Curl').top - at('Squat').bottom);
+    expect(savedLayout(), [['Row', 'Bench press'], ['Squat'], ['Curl']]);
+    expect(at('Squat').left, at('Curl').left, reason: 'the card left the frame');
+    expect(find.text('Superset'), findsOneWidget);
+  });
+
+  testWidgets('dragging the Superset strip moves the whole superset, folded into the strip while it floats', (tester) async {
+    final curl = store.createExercise(name: 'Curl', kind: ExerciseKind.weightReps);
+    final press = store.createExercise(name: 'Press', kind: ExerciseKind.weightReps);
+    store.saveDay(Workout(day: today, entries: [Superset([Slot(bench, sets(1, 80, 8, done: true)), Slot(row, sets(1, 60, 10, done: true))]), Slot(press, sets(1, 40, 8, done: true)), Superset([Slot(squat, sets(1, 100, 5, done: true)), Slot(curl, sets(1, 20, 12))])]));
+    await openToday(tester);
+    Rect at(String name) => tester.getRect(card(name, skipOffstage: false));
+    final strip = handle('superset Bench press + Row');
+
+    Rect stripRect() => tester.getRect(find.ancestor(of: strip, matching: find.byType(Material)).first);
+
+    await drag(
+      tester,
+      strip,
+      () => (at('Squat').bottom + at('Curl').top) / 2 - stripRect().bottom,
+      whileHeld: () {
+        expect(card('Bench press', skipOffstage: false), findsNothing);
+        expect(card('Row', skipOffstage: false), findsNothing);
+        expect(find.text('Bench press + Row'), findsOneWidget);
+      },
+    );
+    expect(savedLayout(), [['Press'], ['Bench press', 'Row'], ['Squat', 'Curl']], reason: 'dropped inside another superset, it lands right above that one');
+    expect(cardOrder(tester, ['Press', 'Bench press', 'Row', 'Squat', 'Curl']), ['Press', 'Bench press', 'Row', 'Squat', 'Curl']);
+    expect(find.text('Bench press + Row'), findsNothing);
+
+    await drag(tester, strip, () => at('Press').top - (stripRect().top - 8));
+    expect(savedLayout(), [['Bench press', 'Row'], ['Press'], ['Squat', 'Curl']]);
+
+    final interrupted = await tester.startGesture(tester.getCenter(strip));
+    for (var i = 0; i < 10; i++) {
+      await interrupted.moveBy(const Offset(0, 20));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(card('Bench press', skipOffstage: false), findsNothing);
+    await interrupted.cancel();
+    await tester.pumpAndSettle();
+    expect(cardOrder(tester, ['Bench press', 'Row', 'Press']), ['Bench press', 'Row', 'Press'], reason: 'a cancelled drag opens the superset again where it was');
+    expect(savedLayout(), [['Bench press', 'Row'], ['Press'], ['Squat', 'Curl']]);
+  });
 }
+

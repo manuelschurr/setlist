@@ -40,8 +40,8 @@ void main() {
 
   SetEntry kg(num w, int r, {bool warmup = false}) => SetEntry(grams: (w * 1000).round(), reps: r, warmup: warmup, status: Done(DateTime.now().subtract(const Duration(days: 3))));
 
-  Future<void> shot(WidgetTester tester, String name) async {
-    await tester.pumpAndSettle();
+  Future<void> shot(WidgetTester tester, String name, {bool settle = true}) async {
+    if (settle) await tester.pumpAndSettle();
     await tester.runAsync(() async {
       final render = boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
       final image = await render.toImage(pixelRatio: tester.view.devicePixelRatio);
@@ -143,11 +143,23 @@ void main() {
 
     await open(Brightness.light);
     await shot(tester, '06-superset');
+
+    final strip = find.byWidgetPredicate((w) => w is Icon && w.semanticLabel == 'Drag to reorder superset Incline Dumbbell Bench Press + Chest Supported Row');
+    final lifted = await tester.startGesture(tester.getCenter(strip));
+    for (var i = 0; i < 20; i++) {
+      await lifted.moveBy(const Offset(0, 12));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await tester.pump(const Duration(milliseconds: 300));
+    await shot(tester, '07-superset-lifted', settle: false);
+    await lifted.cancel();
+    await tester.pumpAndSettle();
+
     await tester.drag(find.byType(Scrollable).first, const Offset(0, -500));
-    await shot(tester, '07-superset-scrolled');
+    await shot(tester, '08-superset-scrolled');
 
     await tester.pumpWidget(const SizedBox());
     await open(Brightness.dark);
-    await shot(tester, '08-superset-dark');
+    await shot(tester, '09-superset-dark');
   }, skip: out == null);
 }
