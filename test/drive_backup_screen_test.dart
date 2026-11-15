@@ -113,7 +113,7 @@ void main() {
     expect(enabled(tester, 'Restore latest backup'), isTrue);
   });
 
-  testWidgets('a phone upgraded from 0.2 is asked to choose a folder while its backups keep going to its file', (tester) async {
+  testWidgets('a phone upgraded from 0.3 is asked to choose a folder while its backups keep going to its file', (tester) async {
     const oldFile = 'content://com.google.android.apps.docs.storage/document/acc%3D1%3Bdoc%3Dold';
     File('${store.path}.drive-backup.json').writeAsStringSync(jsonEncode({'uri': oldFile, 'name': 'Setlist backup.sqlite', 'lastSuccessMs': DateTime.now().millisecondsSinceEpoch}));
     await openScreen(tester);

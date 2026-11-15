@@ -29,7 +29,7 @@ From then on, each time you leave Setlist after a change, it writes the whole da
 
 The same screen shows when the last backup reached the folder and which file holds it, or why the last one failed. **Back up now** writes it at once. **Restore latest backup** replaces everything on the phone with the newest file, after a confirmation. **Restore an earlier week** opens the picker in the backup folder, so you can pick an older file. **Change folder** sends the backups to another folder. **Stop backing up** forgets the folder and leaves its files in Drive.
 
-If you used Google Drive backup in Setlist 0.2, backups keep going to the file you chose then until you tap **Choose backup folder**. The old file stays in Drive.
+If you used Google Drive backup in Setlist 0.2 or 0.3, backups keep going to the file you chose then until you tap **Choose backup folder**. The old file stays in Drive.
 
 On a new phone, install Setlist, open **History**, then **Data**, then **Restore Setlist backup**, and pick the newest weekly file in Drive. Then choose the backup folder again on the new phone, because the link belongs to the phone that made it.
 

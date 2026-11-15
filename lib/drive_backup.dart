@@ -69,7 +69,7 @@ final class FolderLink extends BackupLink {
   DateTime? get lastSuccess => latest?.at;
 }
 
-/// The single file Setlist 0.2 linked. Only the 0.2 state format makes one, so nothing links a single file again. Backups keep going to it until the lifter chooses a folder.
+/// The single file Setlist 0.2 and 0.3 linked. Only their state format makes one, so nothing links a single file again. Backups keep going to it until the lifter chooses a folder.
 final class OldFileLink extends BackupLink {
   const OldFileLink._({required this.file, this.lastSuccess, super.lastError});
 

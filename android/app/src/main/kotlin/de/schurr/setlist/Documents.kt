@@ -15,7 +15,7 @@ import java.io.FileNotFoundException
 import java.io.OutputStream
 import java.util.concurrent.Executors
 
-/** A folder the lifter picked through the system picker, such as one in Google Drive, which the app keeps creating and writing documents in after restarts through a persisted tree permission. Also the single file Setlist 0.2 linked, and one-off copies of a file the lifter picks to restore. */
+/** A folder the lifter picked through the system picker, such as one in Google Drive, which the app keeps creating and writing documents in after restarts through a persisted tree permission. Also the single file Setlist 0.2 and 0.3 linked, and one-off copies of a file the lifter picks to restore. */
 class Documents(private val activity: Activity) : MethodChannel.MethodCallHandler {
     // A getter, because the activity has no context yet when it constructs this.
     private val resolver get() = activity.contentResolver

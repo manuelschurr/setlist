@@ -342,7 +342,7 @@ void main() {
     expect(provider.setsIn(latest(backup).doc.uri, today), hasLength(1));
   });
 
-  test('a phone upgraded from 0.2 keeps backing up to its file until a folder is chosen, which releases that file', () async {
+  test('a phone upgraded from 0.3 keeps backing up to its file until a folder is chosen, which releases that file', () async {
     final last = DateTime.now().subtract(const Duration(days: 1));
     provider.files[oldFile] = Uint8List(0);
     writeState({'uri': oldFile, 'name': 'Setlist backup.sqlite', 'lastSuccessMs': last.millisecondsSinceEpoch});
