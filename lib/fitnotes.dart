@@ -132,7 +132,9 @@ Future<ImportOutcome> importFitNotes({required String backupPath, required Strin
         ImportedDay(
           day: Day.parse(iso),
           note: notes[iso]?.join('\n') ?? '',
-          slots: [for (final MapEntry(key: exerciseKey, value: sets) in (days[iso] ?? const {}).entries) (exerciseKey: exerciseKey, sets: sets)],
+          entries: [
+            for (final MapEntry(key: exerciseKey, value: sets) in (days[iso] ?? const {}).entries) [(exerciseKey: exerciseKey, sets: sets)],
+          ],
         ),
     ],
     defaultWeightStepGrams: defaultStep,

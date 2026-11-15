@@ -47,7 +47,9 @@ final class Store {
   void saveDay(Workout workout) {
     try {
       _inTransaction(_db, () {
-        _replaceDay(workout.day, workout.note, [for (final slot in workout.slots) (slot.exercise.id, slot.sets)]);
+        _replaceDay(workout.day, workout.note, [
+          for (final entry in workout.entries) [for (final slot in entry.slots) (slot.exercise.id, slot.sets)],
+        ]);
         _sql('INSERT INTO app_day (day) VALUES (?) ON CONFLICT DO NOTHING').execute([workout.day.iso]);
       });
     } on SqliteException catch (e) {
@@ -116,7 +118,7 @@ final class Store {
     }
   }
 
-  /// Writes an importer's output. Safe to run any number of times. Each run converges on the same rows, and a failure at any point leaves the database as it was before the run. Throws [ArgumentError] for a day that appears twice, a slot with no sets, or a slot whose exercise key is not in [ImportBatch.exercises], and [StoreWriteFailed] when SQLite refuses a row.
+  /// Writes an importer's output. Safe to run any number of times. Each run converges on the same rows, and a failure at any point leaves the database as it was before the run. Throws [ArgumentError] for a day that appears twice, an entry with no slots, a slot with no sets, or a slot whose exercise key is not in [ImportBatch.exercises], and [StoreWriteFailed] when SQLite refuses a row.
   ///
   /// The batch's defaults, when given, replace the stored ones first. Ownership decides who writes a day. The importer writes a day only if the app has never saved it (no app_day row); those days it replaces wholesale, so a newer backup refreshes them. Days the app has saved are skipped and listed in [ImportReport.skippedDays]. Exercises are matched by import key, then by name ignoring case, then created; a matched exercise keeps the lifter's own name, increment and rest. A created exercise whose name is taken by one with another import key gets the source appended, as in `Squat (fitnotes)`.
   ImportReport importBatch(ImportBatch batch) {
@@ -143,13 +145,17 @@ final class Store {
             skipped.add(d.day);
             continue;
           }
-          final slots = <(ExerciseId, List<SetEntry>)>[];
-          for (final s in d.slots) {
-            final id = ids[s.exerciseKey];
-            if (id == null || s.sets.isEmpty) throw ArgumentError.value(s.exerciseKey, 'slots', 'an imported slot needs an exercise from the batch and at least one set');
-            slots.add((id, s.sets));
+          final entries = <List<(ExerciseId, List<SetEntry>)>>[];
+          for (final entry in d.entries) {
+            if (entry.isEmpty) throw ArgumentError.value(d.day.iso, 'entries', 'an imported entry holds at least one slot');
+            entries.add([]);
+            for (final s in entry) {
+              final id = ids[s.exerciseKey];
+              if (id == null || s.sets.isEmpty) throw ArgumentError.value(s.exerciseKey, 'entries', 'an imported slot needs an exercise from the batch and at least one set');
+              entries.last.add((id, s.sets));
+            }
           }
-          setsWritten += _replaceDay(d.day, d.note, slots);
+          setsWritten += _replaceDay(d.day, d.note, entries);
           daysWritten++;
         }
         return ImportReport(exercisesCreated: created, exercisesLinked: batch.exercises.length - created, daysWritten: daysWritten, setsWritten: setsWritten, skippedDays: skipped);
@@ -215,24 +221,27 @@ final class Store {
     _db.close();
   }
 
-  /// Deletes the day's rows and inserts the given ones, children first so the foreign keys hold at every statement. A day with no slots and no note keeps no row. Returns the number of sets written. The caller owns the transaction.
-  int _replaceDay(Day day, String note, List<(ExerciseId, List<SetEntry>)> slots) {
+  /// Deletes the day's rows and inserts the given ones, children first so the foreign keys hold at every statement. [entries] holds one list of slots per entry, and every slot after the first of its entry is written joined. A day with no slots and no note keeps no row. Returns the number of sets written. The caller owns the transaction.
+  int _replaceDay(Day day, String note, List<List<(ExerciseId, List<SetEntry>)>> entries) {
     final d = day.iso;
     _sql('DELETE FROM workout_set WHERE day = ?').execute([d]);
     _sql('DELETE FROM workout_slot WHERE day = ?').execute([d]);
     _sql('DELETE FROM workout WHERE day = ?').execute([d]);
-    if (slots.isEmpty && note.isEmpty) return 0;
+    if (entries.isEmpty && note.isEmpty) return 0;
     _sql('INSERT INTO workout (day, note) VALUES (?, ?)').execute([d, note]);
     var written = 0;
-    for (final (position, (exercise, sets)) in slots.indexed) {
-      _sql('INSERT INTO workout_slot (day, exercise_id, position) VALUES (?, ?, ?)').execute([d, exercise.value, position]);
-      for (final (index, s) in sets.indexed) {
-        final loggedAt = switch (s.status) {
-          Done(:final at) => at?.millisecondsSinceEpoch,
-          Planned() => null,
-        };
-        _sql('INSERT INTO workout_set (day, exercise_id, set_index, weight_g, reps, metres, seconds, warmup, done, logged_at, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').execute([d, exercise.value, index, s.grams, s.reps, s.metres, s.seconds, s.warmup ? 1 : 0, s.isDone ? 1 : 0, loggedAt, s.note]);
-        written++;
+    var position = 0;
+    for (final entry in entries) {
+      for (final (i, (exercise, sets)) in entry.indexed) {
+        _sql('INSERT INTO workout_slot (day, exercise_id, position, joined) VALUES (?, ?, ?, ?)').execute([d, exercise.value, position++, i > 0 ? 1 : 0]);
+        for (final (index, s) in sets.indexed) {
+          final loggedAt = switch (s.status) {
+            Done(:final at) => at?.millisecondsSinceEpoch,
+            Planned() => null,
+          };
+          _sql('INSERT INTO workout_set (day, exercise_id, set_index, weight_g, reps, metres, seconds, warmup, done, logged_at, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').execute([d, exercise.value, index, s.grams, s.reps, s.metres, s.seconds, s.warmup ? 1 : 0, s.isDone ? 1 : 0, loggedAt, s.note]);
+          written++;
+        }
       }
     }
     return written;
@@ -264,21 +273,29 @@ const _restKey = 'default_rest_s';
 const _exerciseColumns = 'e.id, e.name, e.kind, e.category, e.weight_step_g, e.rest_s';
 const _setColumns = 's.weight_g, s.reps, s.metres, s.seconds, s.warmup, s.done, s.logged_at, s.note AS set_note';
 
-const _selectDays = 'SELECT w.day, w.note AS day_note, $_exerciseColumns, $_setColumns FROM workout w LEFT JOIN workout_slot sl ON sl.day = w.day LEFT JOIN exercise e ON e.id = sl.exercise_id LEFT JOIN workout_set s ON s.day = sl.day AND s.exercise_id = sl.exercise_id';
+const _selectDays = 'SELECT w.day, w.note AS day_note, sl.joined, $_exerciseColumns, $_setColumns FROM workout w LEFT JOIN workout_slot sl ON sl.day = w.day LEFT JOIN exercise e ON e.id = sl.exercise_id LEFT JOIN workout_set s ON s.day = sl.day AND s.exercise_id = sl.exercise_id';
 
-/// Folds [_selectDays] rows, already in day, position and set order, into workouts. Rows parse through the validating [Day], [Slot] and [Workout] constructors, so a corrupt row fails here with an error instead of reaching a screen.
+/// Folds [_selectDays] rows, already in day, position and set order, into workouts. A joined slot goes into the entry of the slot before it. Rows parse through the validating [Day], [Slot], [Superset] and [Workout] constructors, so a corrupt row fails here with an error instead of reaching a screen.
 List<Workout> _assemble(ResultSet rows) {
-  final days = <String, ({String note, Map<int, (Exercise, List<SetEntry>)> slots})>{};
+  final days = <String, ({String note, Map<int, (Exercise, bool, List<SetEntry>)> slots})>{};
   for (final row in rows) {
     final day = days.putIfAbsent(row['day'] as String, () => (note: row['day_note'] as String, slots: {}));
     final id = row['id'] as int?;
     if (id == null) continue;
-    final (_, sets) = day.slots.putIfAbsent(id, () => (_exercise(row), []));
+    final (_, _, sets) = day.slots.putIfAbsent(id, () => (_exercise(row), row['joined'] == 1, []));
     if (row['done'] != null) sets.add(_set(row));
   }
   return [
-    for (final MapEntry(key: day, value: (:note, :slots)) in days.entries) Workout(day: Day.parse(day), note: note, entries: [for (final (exercise, sets) in slots.values) Slot(exercise, sets)]),
+    for (final MapEntry(key: day, value: (:note, :slots)) in days.entries) Workout(day: Day.parse(day), note: note, entries: _entries(slots.values)),
   ];
+}
+
+List<Entry> _entries(Iterable<(Exercise, bool, List<SetEntry>)> slots) {
+  final groups = <List<Slot>>[];
+  for (final (exercise, joined, sets) in slots) {
+    joined ? groups.last.add(Slot(exercise, sets)) : groups.add([Slot(exercise, sets)]);
+  }
+  return [for (final group in groups) group.length == 1 ? group.single : Superset(group)];
 }
 
 Exercise _exercise(Row row) => Exercise(id: ExerciseId(row['id'] as int), name: row['name'] as String, kind: ExerciseKind.values.byName(row['kind'] as String), category: row['category'] as String?, weightStepGrams: row['weight_step_g'] as int, rest: Duration(seconds: row['rest_s'] as int));
@@ -314,7 +331,7 @@ void _configure(Database db) => db.execute('PRAGMA foreign_keys = ON; PRAGMA jou
 /// Append-only. Entry i moves the schema from user_version i to i + 1. A shipped entry is never edited; a change is a new entry. docs/schema.sql is generated from a database these build, and test/store_test.dart fails when the two differ.
 ///
 /// Comments that document the schema sit inside each statement, because SQLite keeps a statement's text in sqlite_master and drops anything between statements.
-const List<String> _migrations = [_v1];
+const List<String> _migrations = [_v1, _v2];
 
 const String _v1 = r'''
 CREATE TABLE exercise (
@@ -385,6 +402,33 @@ CREATE TABLE setting (
 ) STRICT, WITHOUT ROWID;
 ''';
 
+/// Adds `workout_slot.joined` by building the table again. SQLite's ADD COLUMN would splice the column onto the line of `position` and drop a comment placed before it, renaming the old table away would point workout_set's foreign key at the old name, and renaming a new table into place would store its name quoted. So a temporary copy holds the rows while the table is created with exactly this text, whatever SQLite version runs it.
+const String _v2 = r'''
+CREATE TEMP TABLE slot_v1 AS SELECT day, exercise_id, position FROM workout_slot;
+
+DROP TABLE workout_slot;
+
+CREATE TABLE workout_slot (
+  -- One exercise in a day. The primary key is the "an exercise at most once per day" rule.
+  day         TEXT    NOT NULL REFERENCES workout (day),
+  exercise_id INTEGER NOT NULL REFERENCES exercise (id),
+  position    INTEGER NOT NULL CHECK (position >= 0),
+  -- 1 when this slot is in the same superset as the slot before it in position order, so a superset is a slot with 0 and the run of 1s after it, and a superset of one or one whose exercises are apart cannot be stored. The first slot of a day, at position 0, is never joined.
+  joined      INTEGER NOT NULL DEFAULT 0 CHECK (joined IN (0, 1)) CHECK (joined = 0 OR position > 0),
+  PRIMARY KEY (day, exercise_id),
+  UNIQUE (day, position)
+) STRICT, WITHOUT ROWID;
+
+INSERT INTO workout_slot (day, exercise_id, position) SELECT day, exercise_id, position FROM slot_v1;
+
+DROP TABLE slot_v1;
+
+CREATE INDEX slot_by_exercise ON workout_slot (
+  -- Serves the foreign key from exercise, so changing or deleting an exercise does not scan every slot.
+  exercise_id
+);
+''';
+
 /// Brings [db] to `_migrations.length`. Each step is one transaction that includes the user_version bump, and user_version lives in the database header, so it rolls back with the step. A crash mid-migration therefore leaves the old version, and the next launch reruns that step from the start.
 void _migrate(Database db, String? path) {
   final from = db.userVersion;
@@ -436,13 +480,13 @@ final class ImportedExercise {
 }
 
 final class ImportedDay {
-  const ImportedDay({required this.day, this.note = '', this.slots = const []});
+  const ImportedDay({required this.day, this.note = '', this.entries = const []});
 
   final Day day;
   final String note;
 
-  /// In workout order; each exercise key at most once, and each with at least one set.
-  final List<ImportedSlot> slots;
+  /// In workout order, one list per entry: one slot is a plain exercise, two or more a superset in round order. Each exercise key at most once in the day, and each slot with at least one set.
+  final List<List<ImportedSlot>> entries;
 }
 
 typedef ImportedSlot = ({String exerciseKey, List<SetEntry> sets});

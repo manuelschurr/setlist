@@ -62,6 +62,25 @@ void main() {
       expect(store.loadDay(d3), w);
     });
 
+    test('a day with supersets loads back with each superset in its place and round order, and saving it twice leaves the same rows', () {
+      final bench = store.createExercise(name: 'Bench', kind: ExerciseKind.weightReps);
+      final row = store.createExercise(name: 'Row', kind: ExerciseKind.weightReps);
+      final press = store.createExercise(name: 'Press', kind: ExerciseKind.weightReps);
+      final dip = store.createExercise(name: 'Dip', kind: ExerciseKind.reps);
+      final curl = store.createExercise(name: 'Curl', kind: ExerciseKind.weightReps);
+      final w = Workout(day: d1, entries: [
+        Superset([Slot(bench, [done(80000, 5), const SetEntry(grams: 80000, reps: 5)]), Slot(row, [const SetEntry(grams: 60000, reps: 8)])]),
+        Slot(squat, [done(100000, 5)]),
+        Superset([Slot(press, [const SetEntry(grams: 40000, reps: 8)]), Slot(dip, [const SetEntry(reps: 10)]), Slot(curl, [const SetEntry(grams: 12000, reps: 10)])]),
+      ]);
+      store.saveDay(w);
+      final once = dump(path);
+      store.saveDay(w);
+      expect(dump(path), once);
+      expect(store.loadDay(d1), w);
+      expect(store.recentWorkouts(), [w]);
+    });
+
     test('a day never saved loads as an empty day', () {
       expect(store.loadDay(d2), Workout(day: d2));
     });
@@ -179,8 +198,8 @@ void main() {
       source: 'fitnotes',
       exercises: const [ImportedExercise(key: '7', name: 'squat', kind: ExerciseKind.weightReps), ImportedExercise(key: '8', name: 'Plank', kind: ExerciseKind.time)],
       days: [
-        ImportedDay(day: d1, slots: [(exerciseKey: '7', sets: [const SetEntry(grams: 100000, reps: 5, note: 'from a comment', status: Done())])]),
-        ImportedDay(day: d2, note: 'tired', slots: [(exerciseKey: '8', sets: [const SetEntry(seconds: 60, status: Done())])]),
+        ImportedDay(day: d1, entries: [[(exerciseKey: '7', sets: [const SetEntry(grams: 100000, reps: 5, note: 'from a comment', status: Done())])]]),
+        ImportedDay(day: d2, note: 'tired', entries: [[(exerciseKey: '8', sets: [const SetEntry(seconds: 60, status: Done())])]]),
       ],
       defaultWeightStepGrams: 1000,
       defaultRest: const Duration(seconds: 60),
@@ -218,7 +237,7 @@ void main() {
     test('refreshes a day it wrote when a newer backup changes it', () {
       store.importBatch(batch);
       final newer = ImportBatch(source: 'fitnotes', exercises: batch.exercises, days: [
-        ImportedDay(day: d1, slots: [(exerciseKey: '7', sets: [const SetEntry(grams: 105000, reps: 5, status: Done()), const SetEntry(grams: 105000, reps: 4, status: Done())])]),
+        ImportedDay(day: d1, entries: [[(exerciseKey: '7', sets: [const SetEntry(grams: 105000, reps: 5, status: Done()), const SetEntry(grams: 105000, reps: 4, status: Done())])]]),
       ]);
       final report = store.importBatch(newer);
       expect([for (final s in store.loadDay(d1).slots.single.sets) s.grams], [105000, 105000]);
@@ -237,13 +256,31 @@ void main() {
       expect([for (final e in store.exercises()) e.name]..sort(), ['Back squat', 'Plank', 'plank (strong)']);
     });
 
-    test('a batch with an unknown exercise or an empty slot writes nothing', () {
+    test('a batch with an unknown exercise, an empty slot or an empty entry writes nothing', () {
       final before = dump(path);
-      for (final bad in <ImportedSlot>[(exerciseKey: '99', sets: [const SetEntry(reps: 5, status: Done())]), (exerciseKey: '8', sets: [])]) {
-        final broken = ImportBatch(source: 'fitnotes', exercises: batch.exercises, days: [batch.days.first, ImportedDay(day: d2, slots: [bad])], defaultRest: const Duration(seconds: 30));
-        expect(() => store.importBatch(broken), throwsArgumentError, reason: bad.exerciseKey);
-        expect(dump(path), before, reason: bad.exerciseKey);
+      final plank = (exerciseKey: '8', sets: [const SetEntry(seconds: 60, status: Done())]);
+      for (final (bad, why) in <(List<List<ImportedSlot>>, String)>[
+        ([[(exerciseKey: '99', sets: [const SetEntry(reps: 5, status: Done())])]], 'unknown exercise'),
+        ([[(exerciseKey: '8', sets: [])]], 'empty slot'),
+        ([[plank], []], 'empty entry'),
+      ]) {
+        final broken = ImportBatch(source: 'fitnotes', exercises: batch.exercises, days: [batch.days.first, ImportedDay(day: d2, entries: bad)], defaultRest: const Duration(seconds: 30));
+        expect(() => store.importBatch(broken), throwsArgumentError, reason: why);
+        expect(dump(path), before, reason: why);
       }
+    });
+
+    test('a superset in the batch arrives as a superset', () {
+      final paired = ImportBatch(source: 'fitnotes', exercises: batch.exercises, days: [
+        ImportedDay(day: d3, entries: [
+          [(exerciseKey: '8', sets: [const SetEntry(seconds: 60, status: Done())]), (exerciseKey: '7', sets: [const SetEntry(grams: 100000, reps: 5, status: Done())])],
+        ]),
+      ]);
+      store.importBatch(paired);
+      final plank = store.exercises().singleWhere((e) => e.name == 'Plank');
+      expect(store.loadDay(d3).entries, [
+        Superset([Slot(plank, [const SetEntry(seconds: 60, status: Done())]), Slot(squat, [const SetEntry(grams: 100000, reps: 5, status: Done())])]),
+      ]);
     });
 
     test('a batch that holds one day twice writes nothing', () {
@@ -288,6 +325,54 @@ void main() {
       addTearDown(backup.close);
       expect(backup.userVersion, 0);
       expect(backup.select('SELECT x FROM keep').single['x'], 42);
+    });
+
+    test('a v1 file with data migrates its days as plain exercises, keeps a v1 copy, and ends with the schema a new file has', () {
+      final v1 = '$path.v1';
+      sqlite3.open(v1)
+        ..execute(File('test/schema_v1.sql').readAsStringSync())
+        ..execute('''
+INSERT INTO exercise (id, name, kind, weight_step_g, rest_s) VALUES (1, 'Squat', 'weightReps', 2500, 120), (2, 'Bench', 'weightReps', 2500, 90);
+INSERT INTO workout (day, note) VALUES ('2026-11-09', 'legs');
+INSERT INTO workout_slot (day, exercise_id, position) VALUES ('2026-11-09', 2, 0), ('2026-11-09', 1, 1);
+INSERT INTO workout_set (day, exercise_id, set_index, weight_g, reps, done) VALUES ('2026-11-09', 2, 0, 80000, 5, 1), ('2026-11-09', 1, 0, 100000, 5, 0), ('2026-11-09', 1, 1, 100000, 5, 0);
+INSERT INTO app_day (day) VALUES ('2026-11-09');
+PRAGMA user_version = 1;
+''')
+        ..close();
+
+      final migrated = Store.open(v1);
+      addTearDown(migrated.close);
+      const bench = Exercise(id: ExerciseId(2), name: 'Bench', kind: ExerciseKind.weightReps, rest: Duration(seconds: 90));
+      const squatV1 = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps);
+      expect(migrated.loadDay(d1), Workout(day: d1, note: 'legs', entries: [Slot(bench, [const SetEntry(grams: 80000, reps: 5, status: Done())]), Slot(squatV1, [const SetEntry(grams: 100000, reps: 5), const SetEntry(grams: 100000, reps: 5)])]));
+      final paired = Workout(day: d2, entries: [Superset([Slot(squatV1, [const SetEntry(grams: 100000, reps: 5)]), Slot(bench, [const SetEntry(grams: 80000, reps: 5)])])]);
+      migrated.saveDay(paired);
+      expect(migrated.loadDay(d2), paired);
+
+      List<String> schema(String file) {
+        final db = sqlite3.open(file, mode: OpenMode.readOnly);
+        try {
+          return [for (final row in db.select('SELECT type, name, sql FROM sqlite_master ORDER BY rowid')) '$row', 'user_version ${db.userVersion}'];
+        } finally {
+          db.close();
+        }
+      }
+
+      expect(schema(v1), schema(path));
+      final copy = sqlite3.open('$v1.v1.bak', mode: OpenMode.readOnly);
+      addTearDown(copy.close);
+      expect(copy.userVersion, 1);
+      expect([for (final row in copy.select('SELECT exercise_id FROM workout_slot ORDER BY position')) row['exercise_id']], [2, 1]);
+    });
+
+    test('a slot cannot be stored joined at position 0, or with any flag but 0 and 1', () {
+      store.saveDay(Workout(day: d1, entries: [Slot(squat, [done(100000, 5)])]));
+      final raw = sqlite3.open(path);
+      addTearDown(raw.close);
+      for (final update in ['UPDATE workout_slot SET joined = 1 WHERE position = 0', 'UPDATE workout_slot SET joined = 2']) {
+        expect(() => raw.execute(update), throwsA(isA<SqliteException>()), reason: update);
+      }
     });
 
     test('a fresh file needs no copy, and reopening a current file keeps its data and copies nothing', () {

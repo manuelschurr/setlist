@@ -67,6 +67,9 @@ PRAGMA user_version = 22;
 
 SetEntry done(int grams, int reps, {String note = ''}) => SetEntry(grams: grams, reps: reps, note: note, status: const Done());
 
+/// A day's slots in workout order, whatever entries hold them.
+List<ImportedSlot> slotsOf(ImportedDay day) => [for (final entry in day.entries) ...entry];
+
 /// Every row of every Setlist table, as sorted text.
 Map<String, List<String>> dump(String path) {
   final db = sqlite3.open(path, mode: OpenMode.readOnly);
@@ -119,17 +122,17 @@ void main() {
       expect(days.keys, [past, noteOnly, cardio, today, ahead]);
 
       expect(days[past]!.note, 'heavy day\ngym busy');
-      expect([for (final s in days[past]!.slots) s.exerciseKey], ['2', '1']);
-      expect(days[past]!.slots[0].sets, [done(20412, 8), done(20412, 8)]);
-      expect(days[past]!.slots[1].sets, [done(100000, 5, note: 'belt / knee wraps'), done(100000, 5), done(100000, 5)], reason: 'the never-ticked placeholder is history now');
+      expect([for (final s in slotsOf(days[past]!)) s.exerciseKey], ['2', '1']);
+      expect(slotsOf(days[past]!)[0].sets, [done(20412, 8), done(20412, 8)]);
+      expect(slotsOf(days[past]!)[1].sets, [done(100000, 5, note: 'belt / knee wraps'), done(100000, 5), done(100000, 5)], reason: 'the never-ticked placeholder is history now');
 
-      expect((days[noteOnly]!.note, days[noteOnly]!.slots.length), ('rest day', 0));
+      expect((days[noteOnly]!.note, slotsOf(days[noteOnly]!).length), ('rest day', 0));
 
-      expect([for (final s in days[cardio]!.slots) s.exerciseKey], ['5', '4', '3']);
-      expect(days[cardio]!.slots[0].sets, [const SetEntry(metres: 5200, seconds: 1500, status: Done())]);
+      expect([for (final s in slotsOf(days[cardio]!)) s.exerciseKey], ['5', '4', '3']);
+      expect(slotsOf(days[cardio]!)[0].sets, [const SetEntry(metres: 5200, seconds: 1500, status: Done())]);
 
-      expect(days[today]!.slots.single.sets, [done(102500, 5), const SetEntry(grams: 102500, reps: 5)]);
-      expect(days[ahead]!.slots.single.sets, [const SetEntry(grams: 22500, reps: 8)]);
+      expect(slotsOf(days[today]!).single.sets, [done(102500, 5), const SetEntry(grams: 102500, reps: 5)]);
+      expect(slotsOf(days[ahead]!).single.sets, [const SetEntry(grams: 22500, reps: 8)]);
     });
 
     test('counts what it leaves out, including comments whose set is gone', () {
@@ -141,7 +144,7 @@ void main() {
       final backup = sqlite3.open(backupPath, mode: OpenMode.readOnly);
       addTearDown(backup.close);
       final ahead = readFitNotes(backup).batch.days.last;
-      expect(ahead.slots.single.sets.single.isDone, Day.of(DateTime.now()).iso.compareTo('2026-11-13') > 0);
+      expect(slotsOf(ahead).single.sets.single.isDone, Day.of(DateTime.now()).iso.compareTo('2026-11-13') > 0);
     });
   });
 
