@@ -23,13 +23,17 @@ A Google Drive automatic backup from FitNotes arrives as a zip file. Unzip it fi
 
 ## Back up and restore
 
-**History**, then **Data**, then **Google Drive backup** keeps a copy of everything on Google Drive without you having to remember it. Tap **Choose backup file**, pick Drive and a folder in the system picker, and tap **Save**. From then on, each time you leave Setlist after a change, it writes the whole database over that file and hands it to the Drive app, which uploads it. No Google sign-in in Setlist is needed, only the Drive app signed in on the phone.
+**History**, then **Data**, then **Google Drive backup** keeps a copy of everything on Google Drive without you having to remember it. Tap **Choose backup folder**. In the system picker, pick Drive, open **My Drive**, then pick a folder or create one, such as `Setlist backups`, and tap **Use this folder**, then **Allow**. My Drive itself can't be used. No Google sign-in in Setlist is needed, only the Drive app signed in on the phone.
 
-The same screen shows when the last backup reached the file, or why the last one failed. **Back up now** writes it at once. **Restore from this backup** replaces everything on the phone with the file, after a confirmation. **Change file** starts a new file. **Stop backing up** forgets the file and leaves it in Drive.
+From then on, each time you leave Setlist after a change, it writes the whole database over this week's file in that folder and hands it to the Drive app, which uploads it. Each week gets its own file, named by the Monday it starts, such as `Setlist week of 2026-11-09.sqlite`. Setlist never changes an earlier week's file, so a mistake can only reach this week's, and it never deletes one. Delete old files in Drive if you need the space.
 
-On a new phone, install Setlist, open **History**, then **Data**, then **Restore Setlist backup**, and pick the backup file in Drive. Then choose a backup file again on the new phone, because the link belongs to the phone that made it.
+The same screen shows when the last backup reached the folder and which file holds it, or why the last one failed. **Back up now** writes it at once. **Restore latest backup** replaces everything on the phone with the newest file, after a confirmation. **Restore an earlier week** opens the picker in the backup folder, so you can pick an older file. **Change folder** sends the backups to another folder. **Stop backing up** forgets the folder and leaves its files in Drive.
 
-**Export Setlist backup** saves a one-off copy wherever you choose, and **Restore Setlist backup** replaces everything with such a copy, after a confirmation. Every restore keeps the replaced database in Setlist's own storage as `setlist.sqlite.before-restore-<unix ms>`.
+If you used Google Drive backup in Setlist 0.2, backups keep going to the file you chose then until you tap **Choose backup folder**. The old file stays in Drive.
+
+On a new phone, install Setlist, open **History**, then **Data**, then **Restore Setlist backup**, and pick the newest weekly file in Drive. Then choose the backup folder again on the new phone, because the link belongs to the phone that made it.
+
+**Export Setlist backup** saves a one-off copy wherever you choose, and **Restore Setlist backup** replaces everything with such a copy, after a confirmation. While a backup folder is linked, that picker opens in it. Every restore keeps the replaced database in Setlist's own storage as `setlist.sqlite.before-restore-<unix ms>`.
 
 ## Develop
 
