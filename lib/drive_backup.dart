@@ -318,7 +318,7 @@ final class DriveBackup extends ChangeNotifier {
         {'folder': {'uri': final String uri, 'name': final String name}} => FolderLink(
           folder: (uri: uri, name: name),
           latest: switch (json['latest']) {
-            {'week': final String week, 'uri': final String uri, 'name': final String name, 'atMs': final int ms} => (week: Week.parse(week), doc: (uri: uri, name: name), at: DateTime.fromMillisecondsSinceEpoch(ms)),
+            {'week': final String week, 'uri': final String uri, 'name': final String name, 'atMs': final int ms} => _weekFile(week, (uri: uri, name: name), ms),
             _ => null,
           },
           lastError: error,
@@ -337,6 +337,15 @@ final class DriveBackup extends ChangeNotifier {
       // Unreadable: treated as unlinked, so the lifter links again.
       return null;
     }
+  }
+}
+
+/// A week that does not parse drops only the latest file, so the next backup starts a new one instead of the folder being forgotten and backups stopping.
+WeekFile? _weekFile(String week, DriveDoc doc, int atMs) {
+  try {
+    return (week: Week.parse(week), doc: doc, at: DateTime.fromMillisecondsSinceEpoch(atMs));
+  } on FormatException {
+    return null;
   }
 }
 

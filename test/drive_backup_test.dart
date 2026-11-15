@@ -333,6 +333,20 @@ void main() {
     expect(provider.created, hasLength(1));
   });
 
+  test('a state file whose latest week is not a Monday keeps the folder linked, and the next backup starts this week\'s file', () async {
+    writeState({
+      'folder': {'uri': FakeProvider.backups.uri, 'name': FakeProvider.backups.name},
+      'latest': {'week': '2026-11-10', 'uri': '${FakeProvider.backups.uri}/document/9', 'name': 'Setlist week of 2026-11-10.sqlite', 'atMs': 0},
+    });
+    final backup = open();
+    expect(folderLink(backup).folder, FakeProvider.backups);
+    expect(folderLink(backup).latest, isNull);
+
+    await backup.backUpIfChanged();
+    expect(provider.created, ['Setlist week of 2026-11-09.sqlite']);
+    expect(provider.setsIn(latest(backup).doc.uri, today), hasLength(1));
+  });
+
   test('a phone upgraded from 0.2 keeps backing up to its file until a folder is chosen, which releases that file', () async {
     final last = DateTime.now().subtract(const Duration(days: 1));
     provider.files[oldFile] = Uint8List(0);
