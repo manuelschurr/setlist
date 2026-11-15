@@ -161,7 +161,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
     RemoveSet() => 'Set removed',
     RemoveExercise() => 'Exercise removed',
     CopyDay() => 'Workout copied',
-    FocusSet() || SetField() || SetWarmup() || SetSetNote() || UnlogSet() || AddSet() || AddExercise() || Arrange() || SetNote() || UpdateExercise() => null,
+    FocusSet() || SetField() || SetWarmup() || SetSetNote() || UnlogSet() || AddSet() || AddExercise() || Arrange() || SupersetWith() || SetNote() || UpdateExercise() => null,
   };
 
   Future<T?> _push<T>(Widget screen) async {

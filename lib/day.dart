@@ -286,18 +286,23 @@ final class Workout {
     }
   }
 
-  /// The rest countdown at [now], derived from the log times, never stored. Undo, app restarts and edits during rest therefore need no timer state.
+  /// The rest countdown at [now], derived from the log times, never stored. Undo, app restarts and edits during rest therefore need no timer state. It follows the latest log. In a superset there is none while an exercise after the logged one in the round still has a planned set, because the round is not over, and otherwise it lasts the longest rest of the superset's exercises. [Rest.exercise] is always the exercise of the latest log, which the notification names.
   Rest? restAt(DateTime now) {
     if (_firstPlanned(this) == null) return null;
-    ({DateTime at, Exercise exercise})? latest;
+    ({DateTime at, Slot slot})? latest;
     for (final slot in slots) {
       for (final set in slot.sets) {
-        if (set.status case Done(:final at?) when latest == null || at.isAfter(latest.at)) latest = (at: at, exercise: slot.exercise);
+        if (set.status case Done(:final at?) when latest == null || at.isAfter(latest.at)) latest = (at: at, slot: slot);
       }
     }
     if (latest == null) return null;
-    final endsAt = latest.at.add(latest.exercise.rest);
-    return endsAt.isAfter(now) ? (exercise: latest.exercise, endsAt: endsAt) : null;
+    final exercise = latest.slot.exercise;
+    final round = entryOf(exercise.id)!.slots;
+    final later = round.skip(round.indexWhere((s) => s.exercise.id == exercise.id) + 1);
+    if (later.any((s) => s.sets.any((set) => set.isPlanned))) return null;
+    final rest = round.map((s) => s.exercise.rest).reduce((a, b) => a > b ? a : b);
+    final endsAt = latest.at.add(rest);
+    return endsAt.isAfter(now) ? (exercise: exercise, endsAt: endsAt) : null;
   }
 
   Summary get summary {
@@ -412,6 +417,13 @@ final class Arrange extends Command {
   final Layout layout;
 }
 
+/// The card menu's "Superset with…". [added] moves to right after [anchor] and joins [anchor]'s superset, or the two start a new one. A superset [added] leaves with one exercise becomes that plain exercise. Changes nothing when either is not in the day, when they are the same, or when [added] is already in [anchor]'s superset. The focus stays on its set.
+final class SupersetWith extends Command {
+  const SupersetWith(this.anchor, this.added);
+  final ExerciseId anchor;
+  final ExerciseId added;
+}
+
 final class CopyDay extends Command {
   const CopyDay(this.source);
   final Workout source;
@@ -442,6 +454,7 @@ DayState reduce(DayState state, Command command) {
     AddExercise(:final exercise, :final lastSession) => _addExercise(state, exercise, lastSession),
     RemoveExercise(:final exercise) => _removeExercise(state, exercise),
     Arrange(:final layout) => _next(state, _arrange(w, layout), state.focus),
+    SupersetWith(:final anchor, :final added) => _next(state, _supersetWith(w, anchor, added), state.focus),
     CopyDay(:final source) => _copyDay(state, source),
     SetNote(:final note) => note == w.note ? state : _next(state, Workout(day: w.day, note: note, entries: w.entries), state.focus),
     UpdateExercise(:final exercise) => _next(state, _updateExercise(w, exercise), state.focus),
@@ -465,7 +478,7 @@ Workout _cascade(Workout w, SetRef ref, Field field, int value) {
   return _withSlot(w, Slot(slot.exercise, next));
 }
 
-/// Focus moves only when the logged set held the focus, or when the focus was on no planned set. It then goes to the next planned set after [ref] in the same exercise, else to the first planned set of that exercise (one skipped within it), else to the first planned set from the top of the workout (an exercise skipped for a busy rack comes back next), else to null and the panel shows the summary. Checking the circle on some other row leaves the panel where it is. Logging a set that is already done keeps its original time and still moves focus; that is the panel's "Next set" button on a corrected set.
+/// Focus moves only when the logged set held the focus, or when the focus was on no planned set, and then to [focusAfterLog]. Checking the circle on some other row leaves the panel where it is. Logging a set that is already done keeps its original time and still moves focus; that is the panel's "Next set" button on a corrected set.
 DayState _log(DayState state, SetRef ref, DateTime at) {
   final w = state.workout;
   final target = w.setAt(ref);
@@ -473,7 +486,22 @@ DayState _log(DayState state, SetRef ref, DateTime at) {
   final logged = target.isDone ? w : _replaceSet(w, ref, (s) => s.copyWith(status: Done(at)));
   final current = state.focus;
   final advance = current == null || current == ref || w.setAt(current)?.isPlanned != true;
-  return _next(state, logged, advance ? _plannedFrom(logged, ref.exercise, ref.index + 1) : current);
+  return _next(state, logged, advance ? focusAfterLog(logged, ref) : current);
+}
+
+/// Where the focus goes when the set at [ref] is logged in [workout], whether that set is still planned or already done. Logging moves the focus here, and the panel names the exercise it will land on, so the two never disagree.
+///
+/// In a superset it goes to the next exercise of the round after [ref]'s, wrapping to the first, that has a planned set, and there to its first planned set. When no other exercise of the superset has one, and for a plain exercise, it goes to the next planned set after [ref] in its own exercise, else to the first planned set of that exercise (one skipped within it), else to the first planned set from the top of the workout (an exercise skipped for a busy rack comes back next), else to null and the panel shows the summary.
+SetRef? focusAfterLog(Workout workout, SetRef ref) {
+  final logged = _replaceSet(workout, ref, (s) => s.isDone ? s : s.copyWith(status: const Done()));
+  final round = logged.entryOf(ref.exercise)?.slots ?? const <Slot>[];
+  final at = round.indexWhere((s) => s.exercise.id == ref.exercise);
+  for (var k = 1; k < round.length; k++) {
+    final slot = round[(at + k) % round.length];
+    final planned = slot.sets.indexWhere((s) => s.isPlanned);
+    if (planned >= 0) return (exercise: slot.exercise.id, index: planned);
+  }
+  return _plannedFrom(logged, ref.exercise, ref.index + 1);
 }
 
 DayState _addExercise(DayState state, Exercise exercise, List<SetEntry> lastSession) {
@@ -539,6 +567,19 @@ Workout _arrange(Workout w, Layout layout) {
     for (final group in layout) [for (final id in group) slots[id]!],
   ]);
   return next == w ? w : next;
+}
+
+Workout _supersetWith(Workout w, ExerciseId anchor, ExerciseId added) {
+  final home = w.entryOf(anchor);
+  final moving = w.slotOf(added);
+  if (home == null || moving == null || home.slots.any((s) => s.exercise.id == added)) return w;
+  return _withGroups(w, [
+    for (final entry in w.entries)
+      [
+        for (final slot in entry.slots)
+          if (slot.exercise.id == anchor) ...[slot, moving] else if (slot.exercise.id != added) slot,
+      ],
+  ]);
 }
 
 Workout _updateExercise(Workout w, Exercise exercise) {
