@@ -15,6 +15,7 @@ CREATE TABLE Routine(_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, 
 CREATE TABLE Comment (_id INTEGER PRIMARY KEY AUTOINCREMENT, date DATE NOT NULL, owner_type_id INTEGER NOT NULL, owner_id INTEGER NOT NULL, comment TEXT NOT NULL);
 CREATE TABLE WorkoutComment (_id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, comment TEXT NOT NULL);
 CREATE TABLE WorkoutGroup (_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, date TEXT NOT NULL, colour INTEGER NOT NULL, routine_section_id INTEGER, auto_jump_enabled INTEGER NOT NULL DEFAULT 1, rest_timer_auto_start_enabled INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE WorkoutGroupExercise(_id INTEGER PRIMARY KEY AUTOINCREMENT, exercise_id INTEGER NOT NULL, date TEXT NOT NULL, routine_section_id INTEGER NOT NULL, workout_group_id INTEGER NOT NULL);
 CREATE TABLE BodyWeight (_id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, body_weight_metric REAL NOT NULL, body_fat REAL NOT NULL, comments TEXT);
 CREATE TABLE settings (_id INTEGER PRIMARY KEY AUTOINCREMENT, metric INTEGER NOT NULL DEFAULT 1, weight_increment REAL, rest_timer_seconds INTEGER);
 ''';
@@ -57,7 +58,18 @@ INSERT INTO Comment (_id, date, owner_type_id, owner_id, comment) VALUES
   (3, '2026-10-01', 1, 999, 'set deleted since'),
   (4, '2026-11-01', 2, 1, 'workout comment, old kind');
 INSERT INTO WorkoutComment (date, comment) VALUES ('2026-11-01', 'heavy day'), ('2026-11-01', 'gym busy'), ('2026-11-03', 'rest day');
-INSERT INTO WorkoutGroup (name, date, colour) VALUES ('Superset', '2026-11-01', 1);
+INSERT INTO WorkoutGroup (_id, name, date, colour, routine_section_id) VALUES
+  (1, 'Superset', '2026-11-01', 1, NULL),
+  (2, 'Superset', '2026-11-05', 2, 0),
+  (3, 'Superset 2', '2026-11-05', 3, 0),
+  (4, 'Superset', '2026-11-12', 1, 0),
+  (5, 'Superset', '', 1, 7);
+INSERT INTO WorkoutGroupExercise (exercise_id, date, routine_section_id, workout_group_id) VALUES
+  (1, '2026-11-01', 0, 1), (2, '2026-11-01', 0, 1),
+  (3, '2026-11-05', 0, 2), (5, '2026-11-05', 0, 2),
+  (3, '2026-11-05', 0, 3), (4, '2026-11-05', 0, 3),
+  (1, '2026-11-12', 0, 4), (2, '2026-11-12', 0, 4),
+  (1, '', 7, 5), (4, '', 7, 5);
 INSERT INTO Routine (name) VALUES ('Push');
 INSERT INTO BodyWeight (date, body_weight_metric, body_fat) VALUES ('2026-11-01', 80, 0), ('2026-11-02', 80.2, 0);
 PRAGMA user_version = 22;
@@ -128,16 +140,28 @@ void main() {
 
       expect((days[noteOnly]!.note, slotsOf(days[noteOnly]!).length), ('rest day', 0));
 
-      expect([for (final s in slotsOf(days[cardio]!)) s.exerciseKey], ['5', '4', '3']);
+      expect([for (final s in slotsOf(days[cardio]!)) s.exerciseKey], ['5', '3', '4'], reason: 'squat (2) joins Run in their superset at the place of Run');
       expect(slotsOf(days[cardio]!)[0].sets, [const SetEntry(metres: 5200, seconds: 1500, status: Done())]);
 
       expect(slotsOf(days[today]!).single.sets, [done(102500, 5), const SetEntry(grams: 102500, reps: 5)]);
       expect(slotsOf(days[ahead]!).single.sets, [const SetEntry(grams: 22500, reps: 8)]);
     });
 
-    test('counts what it leaves out, including comments whose set is gone', () {
+    test('a group on a logged day makes a superset of its exercises with sets that day, where the first of them sits and in the day order', () {
+      final (:batch, trainingLogRows: _, leftOut: _) = read();
+      List<List<String>> keys(ImportedDay day) => [
+        for (final entry in day.entries) [for (final s in entry) s.exerciseKey],
+      ];
+      final days = {for (final d in batch.days) d.day: d};
+      expect(keys(days[past]!), [['2', '1']]);
+      expect(keys(days[cardio]!), [['5', '3'], ['4']], reason: 'Squat (2) stays in the first group, which leaves the second with only Plank');
+      expect(keys(days[today]!), [['1']], reason: 'Bench Press has no set that day, and a routine group is no superset');
+      expect(keys(days[ahead]!), [['2']]);
+    });
+
+    test('counts what it leaves out, including comments whose set is gone, and a routine group goes with its routine', () {
       final (batch: _, trainingLogRows: _, :leftOut) = read();
-      expect(leftOut, {'superset groups': 1, 'routines': 1, 'body weight entries': 2, 'comments on deleted sets': 1, 'other comments': 1});
+      expect(leftOut, {'routines': 1, 'body weight entries': 2, 'comments on deleted sets': 1, 'other comments': 1});
     });
 
     test('takes today from the clock by default', () {
@@ -161,6 +185,19 @@ void main() {
       final second = await importFitNotes(backupPath: backupPath, dbPath: dbPath);
       expect(dump(dbPath), after);
       expect((second.written.exercisesCreated, second.written.setsWritten), (0, trainingLogRows));
+    });
+
+    test('brings the superset groups of logged days into those days', () async {
+      await importFitNotes(backupPath: backupPath, dbPath: dbPath);
+      final store = Store.open(dbPath);
+      addTearDown(store.close);
+      List<List<String>> names(Day day) => [
+        for (final entry in store.loadDay(day).entries) [for (final slot in entry.slots) slot.exercise.name],
+      ];
+      expect(names(past), [['Bench Press', 'Squat']]);
+      expect(names(cardio), [['Run', 'squat (2)'], ['Plank']]);
+      expect(store.loadDay(cardio).entries.first, isA<Superset>());
+      expect(names(today), [['Squat']]);
     });
 
     test('keeps a copy of the Setlist database from before each import', () async {
@@ -231,6 +268,7 @@ void main() {
     final unmatched = expected.toSet().difference(actual.toSet()).length + actual.toSet().difference(expected.toSet()).length;
     expect((actual.length, actual.toSet().length, unmatched), (rows, rows, 0), reason: 'every training_log row maps to exactly one set');
     final notes = setlist.select("SELECT COUNT(*) AS n FROM workout_set WHERE note != ''").single['n'];
+    final joined = setlist.select('SELECT COUNT(*) AS n FROM workout_slot WHERE joined = 1').single['n'];
 
     final after = dump(dbPath);
     final second = await importFitNotes(backupPath: realBackup, dbPath: dbPath);
@@ -239,6 +277,6 @@ void main() {
 
     // Counts only: the backup holds personal data, so nothing from its rows is printed.
     // ignore: avoid_print
-    print('real backup: training_log rows $rows, sets written ${first.written.setsWritten}, days ${first.written.daysWritten}, exercises created ${first.written.exercisesCreated}, sets with a note $notes, left out ${first.leftOut}, second run created ${second.written.exercisesCreated} exercises and changed nothing');
+    print('real backup: training_log rows $rows, sets written ${first.written.setsWritten}, days ${first.written.daysWritten}, exercises created ${first.written.exercisesCreated}, sets with a note $notes, slots joined to a superset $joined, left out ${first.leftOut}, second run created ${second.written.exercisesCreated} exercises and changed nothing');
   }, skip: realBackup != null && File(realBackup).existsSync() ? false : 'set SETLIST_FITNOTES_BACKUP to a .fitnotes file');
 }
