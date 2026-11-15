@@ -63,6 +63,10 @@ void main() {
 
   List<SetEntry> savedSets(Exercise e) => store.loadDay(today).slotOf(e.id)!.sets;
 
+  List<List<String>> savedLayout() => [
+    for (final entry in store.loadDay(today).entries) [for (final slot in entry.slots) slot.exercise.name],
+  ];
+
   testWidgets('one plus tap on set 1 turns a copied 3 x 5 at 100 kg into 3 x 5 at 102.5 kg', (tester) async {
     store.saveDay(Workout(day: daysAgo(3), entries: [Slot(squat, sets(3, 100, 5, done: true))]));
     await openToday(tester);
@@ -372,10 +376,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  List<List<String>> savedLayout() => [
-    for (final entry in store.loadDay(today).entries) [for (final slot in entry.slots) slot.exercise.name],
-  ];
-
   testWidgets('dragging a card by its handle into a superset frame, within it and out of it regroups the day', (tester) async {
     final curl = store.createExercise(name: 'Curl', kind: ExerciseKind.weightReps);
     store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 100, 5, done: true)), Superset([Slot(bench, sets(1, 80, 8, done: true)), Slot(row, sets(1, 60, 10, done: true))]), Slot(curl, sets(1, 20, 12))]));
@@ -434,5 +434,43 @@ void main() {
     expect(cardOrder(tester, ['Bench press', 'Row', 'Press']), ['Bench press', 'Row', 'Press'], reason: 'a cancelled drag opens the superset again where it was');
     expect(savedLayout(), [['Bench press', 'Row'], ['Press'], ['Squat', 'Curl']]);
   });
-}
 
+  testWidgets("Superset with… offers only the exercises outside the card's superset and joins the pick to it", (tester) async {
+    final curl = store.createExercise(name: 'Curl', kind: ExerciseKind.weightReps);
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 100, 5, done: true)), Superset([Slot(bench, sets(1, 80, 8, done: true)), Slot(row, sets(1, 60, 10, done: true))]), Slot(curl, sets(1, 20, 12))]));
+    await openToday(tester);
+    Future<void> openMenu(String name) async {
+      await tester.ensureVisible(find.byTooltip('More for $name'));
+      await tester.tap(find.byTooltip('More for $name'));
+      await tester.pumpAndSettle();
+    }
+
+    final sheet = find.byType(BottomSheet);
+    List<String> offered() => [for (final tile in tester.widgetList<ListTile>(find.descendant(of: sheet, matching: find.byType(ListTile)))) (tile.title! as Text).data!];
+
+    await openMenu('Squat');
+    await tester.tap(find.text('Superset with…'));
+    await tester.pumpAndSettle();
+    expect(offered(), ['Bench press', 'Row', 'Curl']);
+    expect(find.descendant(of: sheet, matching: find.text('Bench press + Row')), findsNWidgets(2));
+    await tester.tap(find.descendant(of: sheet, matching: find.text('Curl')));
+    await tester.pumpAndSettle();
+    expect(savedLayout(), [['Squat', 'Curl'], ['Bench press', 'Row']]);
+    expect(find.text('Superset'), findsNWidgets(2));
+
+    await openMenu('Bench press');
+    await tester.tap(find.text('Superset with…'));
+    await tester.pumpAndSettle();
+    expect(offered(), ['Squat', 'Curl']);
+    await tester.tap(find.descendant(of: sheet, matching: find.text('Squat')));
+    await tester.pumpAndSettle();
+    expect(savedLayout(), [['Curl'], ['Bench press', 'Squat', 'Row']], reason: 'the pick left its pair, and the one left is plain');
+
+    await openMenu('Curl');
+    await tester.tap(find.text('Remove'));
+    await tester.pumpAndSettle();
+    await openMenu('Bench press');
+    expect(find.text('Edit exercise'), findsOneWidget);
+    expect(find.text('Superset with…'), findsNothing, reason: 'every exercise of the day is already in this superset');
+  });
+}

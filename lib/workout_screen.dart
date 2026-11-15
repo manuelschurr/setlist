@@ -247,9 +247,51 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
       case _CardAction.edit:
         final edited = await editExercise(context, widget.store, slot.exercise);
         if (edited != null && mounted) _dispatch(UpdateExercise(edited));
+      case _CardAction.superset:
+        final picked = await _pickPartner(slot);
+        if (picked != null && mounted) _dispatch(SupersetWith(slot.exercise.id, picked));
       case _CardAction.remove:
         _dispatch(RemoveExercise(slot.exercise.id));
     }
+  }
+
+  /// What "Superset with…" offers for [slot]: every exercise of the day outside [slot]'s own superset, or every other one when [slot] is plain.
+  List<Slot> _partnersOf(Slot slot) {
+    final own = _state.workout.entryOf(slot.exercise.id)!.slots;
+    return [
+      for (final other in _state.workout.slots)
+        if (!own.any((s) => s.exercise.id == other.exercise.id)) other,
+    ];
+  }
+
+  /// An exercise already in another superset shows that superset under its name, because picking it takes it out of there.
+  Future<ExerciseId?> _pickPartner(Slot slot) {
+    final workout = _state.workout;
+    return showModalBottomSheet<ExerciseId>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+              child: Text('Superset ${slot.exercise.name} with', style: Theme.of(context).textTheme.titleMedium),
+            ),
+            for (final partner in _partnersOf(slot))
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                title: Text(partner.exercise.name),
+                subtitle: switch (workout.entryOf(partner.exercise.id)) {
+                  final Superset other => Text(namesOf([other])),
+                  _ => null,
+                },
+                onTap: () => Navigator.pop(context, partner.exercise.id),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _reveal(ExerciseId id) => WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -390,6 +432,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
                           index: i,
                           slot: slot,
                           framed: workout.entryOf(id) is Superset,
+                          canSuperset: _partnersOf(slot).isNotEmpty,
                           focus: _state.focus,
                           lastTime: alignLastTime(slot.sets, _lastTimeOf(id)),
                           collapsed: _collapsed(slot),
@@ -412,7 +455,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
   }
 }
 
-enum _CardAction { history, edit, remove }
+enum _CardAction { history, edit, superset, remove }
 
 /// A superset's frame is drawn by three kinds of list row that meet edge to edge, so it reads as one shape while each part stays its own row for the drag: [_SupersetHeader] on top, the frame's sides around each of its cards, and [_SupersetFooter] below. The frame lines up with plain cards, and the cards inside are inset by [_frameSide].
 const _cardSide = 12.0;
@@ -500,13 +543,16 @@ class _SupersetFooter extends StatelessWidget {
 }
 
 class _SlotCard extends StatelessWidget {
-  const _SlotCard({super.key, required this.index, required this.slot, required this.framed, required this.focus, required this.lastTime, required this.collapsed, required this.onToggle, required this.onAction, required this.onCommand});
+  const _SlotCard({super.key, required this.index, required this.slot, required this.framed, required this.canSuperset, required this.focus, required this.lastTime, required this.collapsed, required this.onToggle, required this.onAction, required this.onCommand});
 
   final int index;
   final Slot slot;
 
   /// The card sits inside a superset's frame and draws the frame's sides around itself.
   final bool framed;
+
+  /// The day has an exercise "Superset with…" could offer.
+  final bool canSuperset;
   final SetRef? focus;
   final List<SetEntry?> lastTime;
   final bool collapsed;
@@ -546,10 +592,11 @@ class _SlotCard extends StatelessWidget {
             PopupMenuButton<_CardAction>(
               tooltip: 'More for ${slot.exercise.name}',
               onSelected: onAction,
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: _CardAction.history, child: Text('History')),
-                PopupMenuItem(value: _CardAction.edit, child: Text('Edit exercise')),
-                PopupMenuItem(value: _CardAction.remove, child: Text('Remove')),
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: _CardAction.history, child: Text('History')),
+                const PopupMenuItem(value: _CardAction.edit, child: Text('Edit exercise')),
+                if (canSuperset) const PopupMenuItem(value: _CardAction.superset, child: Text('Superset with…')),
+                const PopupMenuItem(value: _CardAction.remove, child: Text('Remove')),
               ],
             ),
           ],
