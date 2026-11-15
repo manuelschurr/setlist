@@ -20,6 +20,8 @@ On a real Android phone, with a workout copied from a past day:
 - Logging the last set of an exercise moves the focus to the next planned set, in the next unfinished exercise, with no dialog.
 - Dragging an exercise by its handle moves it in one gesture.
 - A FitNotes backup imports, and the number of imported sets equals the number of rows in its training log.
+- In a superset, logging a set moves the focus to the next exercise of the round, and the rest countdown starts only when the round is over.
+- Dragging an exercise card into a superset's frame adds it to that superset, dragging it out takes it out, and the superset's own handle moves the whole superset.
 
 ## The workout screen
 
@@ -41,13 +43,21 @@ Why a docked panel rather than editing inside each row: the input controls stay 
 
 **Add exercise.** Adding an exercise to a day creates planned sets copied from the last session of that exercise, or one empty set if it was never done. An exercise appears at most once per day, so adding one already in the day scrolls to it.
 
-**Copy a workout.** Copying a past day appends each of its exercises that the target day does not have yet, with all sets copied as planned.
+**Copy a workout.** Copying a past day appends each of its exercises that the target day does not have yet, with all sets copied as planned. Its supersets come along. An exercise the target day already has stays where it is, the other exercises of its superset are copied together, and a superset left with one exercise arrives as a plain exercise.
 
-**Reorder.** Each card header has a drag handle. Dragging moves the whole card.
+**Reorder.** Each card header has a drag handle. Dragging moves the whole card. A superset has its own handle, on its header strip, that moves the whole superset.
+
+**Supersets.** A superset is two or more exercises done in turn, one set of each per round. An exercise belongs to at most one superset, and a superset never holds another superset. A superset with one exercise does not exist. Whenever an exercise leaves a superset of two, the one left becomes a plain exercise.
+
+**Focus in a superset.** Focus moves after a log under the same condition as for a plain exercise. When it moves from a set of an exercise in a superset, it goes to the next exercise of that superset, in superset order and wrapping to the first, that still has a planned set, and there to its first planned set. When the logged exercise is the only one of its superset with a planned set left, focus goes to its next planned set, as for a plain exercise. When no exercise of the superset has a planned set left, focus goes to the first planned set from the top of the workout.
+
+**Rest in a superset.** Logging a set of an exercise in a superset starts no countdown while an exercise after it in the same superset still has a planned set, because the round is not over. Otherwise the countdown starts and lasts the longest rest of the superset's exercises. In other words, rest comes when the focus goes back up the superset or leaves it.
+
+**Making and changing a superset.** The card menu's "Superset with…" lists the day's exercises that are not in this card's superset. The picked exercise moves to right after this card and joins its superset, or the two start a new one. A picked exercise that was in another superset leaves it. Dragging does the rest. Dropping an exercise card inside a superset's frame puts it in that superset at that spot, which is also its place in the round. Dropping it outside every frame makes it a plain exercise. A whole superset dropped inside another superset's frame lands right above that superset. Removing an exercise takes it out of its superset too. Adding an exercise always adds a plain one at the end.
 
 ## Data shape
 
-The day is the aggregate. A `Workout` holds the date, a note, and an ordered list of slots. A slot is one exercise in that day with its ordered list of sets. List order is position, so reordering is a list move. Every operation is a pure function from `Workout` to `Workout`, which makes the cascade and focus rules unit-testable and gives undo for free by keeping the previous value.
+The day is the aggregate. A `Workout` holds the date, a note, and an ordered list of entries. An entry is either a slot or a superset. A slot is one exercise in that day with its ordered list of sets. A superset holds two or more slots in round order, and one with fewer cannot be built. List order is position, so reordering is a list move, and the day's slots in order are the entries flattened. In the database each slot row keeps its position and a `joined` flag that means "same superset as the slot before it", which cannot describe a superset of one or a superset whose exercises are apart. Every operation is a pure function from `Workout` to `Workout`, which makes the cascade and focus rules unit-testable and gives undo for free by keeping the previous value.
 
 A set holds weight in kg, reps, seconds, whether it is a warm-up, and its status (`planned` or `done`, with the time it was logged). An exercise has a kind (`weightReps`, `reps`, or `time`), which decides which fields the row and panel show, plus a weight step and a default rest time.
 
@@ -57,15 +67,17 @@ Saving writes the whole day in one transaction, replacing what the database held
 
 **Workout screen app bar.** The title is "Today", "Yesterday" or a short date such as "Thu 12 Nov". Tapping it opens a date picker to jump to any day. Actions are History and an overflow with "Workout note" and "Copy a past workout".
 
-**Card header.** Exercise name, progress (`2/4`, or a check when finished), a drag handle, and a menu with History, Edit exercise and Remove. Tapping the header collapses or expands the card. A finished card collapses on its own unless the lifter opened it or the focus is inside it, and shows one summary line such as `4 sets · top 100 × 5`.
+**Card header.** Exercise name, progress (`2/4`, or a check when finished), a drag handle, and a menu with History, Edit exercise, Superset with… and Remove. Tapping the header collapses or expands the card. A finished card collapses on its own unless the lifter opened it or the focus is inside it, and shows one summary line such as `4 sets · top 100 × 5`.
 
 **Set row.** Set number (`W` for a warm-up), the values the kind shows (`100 kg × 5`, `1:30`, `2.5 km · 12:00`), the muted last-time value, and a check circle. The focused row has a filled highlight. A note shows under the values in small text. Swiping a row away deletes the set with an Undo snackbar. Long-pressing a row offers warm-up on or off, the note, and delete. Each card ends with "Add set".
 
-**Panel.** The exercise name and "Set 2 of 4", then one stepper per field of the kind, side by side when there are two, with buttons at least 56 dp. Tapping a value opens a numeric dialog that commits once on OK. One full-width button: "Log set" on a planned set, "Next set" on a done one. While resting, a countdown shows in the panel. When nothing is planned, the panel shows the session summary instead.
+**Superset frame.** A superset is a coloured frame around its exercises' cards. A header strip on top reads "Superset" and carries the superset's drag handle. Each exercise inside keeps its own card, with its header, handle, menu, rows and "Add set", and finished exercises collapse one by one as plain ones do. While the whole superset is dragged, its exercises fold into the header strip.
+
+**Panel.** The exercise name and "Set 2 of 4", followed in a superset by where the focus goes after this set, as in "Set 2 of 4 · then Rows". The panel asks the same rule the log follows, so the two never disagree. Then one stepper per field of the kind, side by side when there are two, with buttons at least 56 dp. Tapping a value opens a numeric dialog that commits once on OK. One full-width button: "Log set" on a planned set, "Next set" on a done one. While resting, a countdown shows in the panel. When nothing is planned, the panel shows the session summary instead.
 
 **Feedback.** Logging, removing and copying each show a snackbar with Undo. Nothing asks for confirmation except restoring a backup, which replaces all data. When the focus moves to another exercise, its card scrolls into view.
 
-**History screen.** Past days newest first, each with the date, the exercise names and the set count. Tapping a day opens it on the same workout screen. Tapping today returns to the home screen instead, so one day never has two screens writing it. A copy button on each day copies it into today through the home screen. The overflow holds the data actions: the Google Drive backup screen, import a FitNotes backup, export a Setlist backup, restore a Setlist backup.
+**History screen.** Past days newest first, each with the date, the exercise names and the set count. A superset's names are joined with a plus, as in "Bench + Rows", here and on the copy tiles. Tapping a day opens it on the same workout screen. Tapping today returns to the home screen instead, so one day never has two screens writing it. A copy button on each day copies it into today through the home screen. The overflow holds the data actions: the Google Drive backup screen, import a FitNotes backup, export a Setlist backup, restore a Setlist backup.
 
 **Google Drive backup.** The lifter links one backup file once, through the system picker's create dialog, usually in Google Drive. From then on, each time the app goes to the background after the database changed, Setlist writes a fresh copy of the whole database over that file, and the Drive app uploads it. The screen shows the file name and the time of the last backup that reached it, or the last error, with Back up now, Restore from this backup (with the restore confirmation), Change file and Stop backing up. Unlinked, it shows one sentence and Choose backup file. A new phone has no link, so it restores through the picker first.
 
@@ -75,4 +87,4 @@ Saving writes the whole day in one transaction, replacing what the database held
 
 ## Out of scope for the first version
 
-Routines and templates (copying a past day covers how the owner works), supersets, charts, body weight, units other than kg, cloud sync. Each can come later without changing the day aggregate.
+Routines and templates (copying a past day covers how the owner works), charts, body weight, units other than kg, cloud sync. Each can come later without changing the day aggregate.
