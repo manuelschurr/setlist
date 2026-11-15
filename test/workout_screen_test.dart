@@ -359,9 +359,10 @@ void main() {
   Future<void> drag(WidgetTester tester, Finder handle, double Function() dy, {void Function()? whileHeld}) async {
     await tester.ensureVisible(handle);
     await tester.pumpAndSettle();
+    final direction = dy().sign;
     final gesture = await tester.startGesture(tester.getCenter(handle));
     for (var i = 0; i < 3; i++) {
-      await gesture.moveBy(const Offset(0, 8));
+      await gesture.moveBy(Offset(0, 8 * direction));
       await tester.pump(const Duration(milliseconds: 16));
     }
     final total = dy();
@@ -394,6 +395,10 @@ void main() {
     expect(savedLayout(), [['Row', 'Bench press'], ['Squat'], ['Curl']]);
     expect(at('Squat').left, at('Curl').left, reason: 'the card left the frame');
     expect(find.text('Superset'), findsOneWidget);
+
+    final below = at('Squat').top;
+    await drag(tester, handle('Squat'), () => below - 40 - at('Squat').top);
+    expect(savedLayout(), [['Row', 'Bench press', 'Squat'], ['Curl']], reason: 'a collapsed card right below the frame, lifted 40 dp, joins its end');
   });
 
   testWidgets('dragging the Superset strip moves the whole superset, folded into the strip while it floats', (tester) async {
@@ -437,7 +442,7 @@ void main() {
 
   testWidgets("Superset with… offers only the exercises outside the card's superset and joins the pick to it", (tester) async {
     final curl = store.createExercise(name: 'Curl', kind: ExerciseKind.weightReps);
-    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 100, 5, done: true)), Superset([Slot(bench, sets(1, 80, 8, done: true)), Slot(row, sets(1, 60, 10, done: true))]), Slot(curl, sets(1, 20, 12))]));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 100, 5, done: true)), Superset([Slot(bench, sets(1, 80, 8, done: true)), Slot(row, sets(1, 60, 10, done: true))]), Slot(curl, sets(1, 20, 12, done: true))]));
     await openToday(tester);
     Future<void> openMenu(String name) async {
       await tester.ensureVisible(find.byTooltip('More for $name'));

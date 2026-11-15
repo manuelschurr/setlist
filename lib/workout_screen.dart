@@ -527,13 +527,14 @@ class _SupersetHeader extends StatelessWidget {
   }
 }
 
+/// The clear space under the cap belongs to this row, so the row is taller than half a collapsed card. While a dragged card's bottom is still in the lower half of its own place, the list pulls the gap back there unless the card's top sits in the upper half of a row, so a shorter row would leave a card from right below almost no way to join the end of the superset.
 class _SupersetFooter extends StatelessWidget {
   const _SupersetFooter({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(_cardSide, 0, _cardSide, 8),
+      padding: const EdgeInsets.fromLTRB(_cardSide, 0, _cardSide, 32),
       child: DecoratedBox(
         decoration: BoxDecoration(color: _frameColor(Theme.of(context).colorScheme), borderRadius: const BorderRadius.vertical(bottom: _frameRadius)),
         child: const SizedBox(height: 12, width: double.infinity),
