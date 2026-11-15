@@ -90,7 +90,7 @@ void main() {
     final squat = seed.createExercise(name: 'Squat', kind: ExerciseKind.weightReps);
     seed.saveDay(Workout(day: today, entries: [Slot(squat, const [SetEntry(grams: 100000, reps: 5)])]));
     nextMillisecond();
-    final linking = DriveBackup(dbPath: path, store: () => seed, clock: clock);
+    final linking = DriveBackup(dbPath: path, store: () => seed, weekClock: clock);
     await linking.linkFolder();
     seed.close();
     final uri = (linking.link! as FolderLink).latest!.doc.uri;

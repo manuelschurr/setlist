@@ -8,7 +8,6 @@ import 'package:setlist/day.dart';
 import 'package:setlist/drive_backup.dart';
 import 'package:setlist/store.dart';
 
-/// The Drive app's document provider as the Android side of `de.schurr.setlist/documents` presents it: a folder picker, documents created in a folder by name (duplicates allowed, as on Drive), files by URI, a file picker that copies, and permissions to release.
 final class FakeProvider {
   FakeProvider() {
     _messenger.setMockMethodCallHandler(_channel, _handle);
@@ -23,31 +22,23 @@ final class FakeProvider {
   final writtenTo = <String>[];
   final released = <String>[];
 
-  /// The names of the documents created in a folder, in order.
   final created = <String>[];
 
-  /// The names Setlist asked to create, including the ones refused.
   final askedToCreate = <String>[];
 
-  /// What the pickers were opened near.
   final nearSeen = <String?>[];
 
-  /// The folder the folder picker hands back, or null when the lifter cancels.
-  DriveDoc? folder = backups;
+  DriveDoc? pickedFolder = backups;
 
-  /// The file the file picker hands back, or null when the lifter cancels.
   Uint8List? pickNext;
 
   /// Every write fails with this while set, as when the lifter revoked the permission.
   PlatformException? refuse;
 
-  /// Writes to these URIs fail, as when the lifter deleted, moved or binned the file in Drive.
   final unwritable = <String>{};
 
-  /// Every create in a folder fails while set.
   bool failCopy = false;
 
-  /// While set, the backup folder is in the Drive bin, and Documents.kt refuses every write into it.
   bool binned = false;
 
   /// While set, the picker stays open until it completes.
@@ -79,7 +70,7 @@ final class FakeProvider {
       case 'openFolder':
         nearSeen.add(args['near']);
         await picking?.future;
-        if (folder case final folder?) return {'uri': folder.uri, 'name': folder.name};
+        if (pickedFolder case final folder?) return {'uri': folder.uri, 'name': folder.name};
         return null;
       case 'copyInto':
         askedToCreate.add(args['name']!);
@@ -130,7 +121,7 @@ void main() {
     nextMillisecond();
   }
 
-  DriveBackup open() => DriveBackup(dbPath: path, store: () => store, clock: () => now);
+  DriveBackup open() => DriveBackup(dbPath: path, store: () => store, weekClock: () => now);
   FolderLink folderLink(DriveBackup backup) => backup.link! as FolderLink;
   WeekFile latest(DriveBackup backup) => folderLink(backup).latest!;
 
@@ -156,6 +147,9 @@ void main() {
     expect(Week.of(DateTime(2026, 11, 16)).fileName, 'Setlist week of 2026-11-16.sqlite');
     expect(Week.of(DateTime(2026, 1, 1, 12)).fileName, 'Setlist week of 2025-12-29.sqlite');
     expect(Week.of(DateTime(2026, 3, 29, 12)), Week.of(DateTime(2026, 3, 23)), reason: 'the Sunday clocks go forward in Europe stays in its week');
+    expect(Week.of(DateTime(2026, 3, 29, 23, 59)).fileName, 'Setlist week of 2026-03-23.sqlite');
+    expect(Week.of(DateTime(2026, 10, 25, 23, 59)).fileName, 'Setlist week of 2026-10-19.sqlite', reason: 'the Sunday clocks go back in Europe stays in its week');
+    expect(Week.of(DateTime(2026, 10, 26)).fileName, 'Setlist week of 2026-10-26.sqlite');
     expect(Week.parse('2026-11-09'), Week.of(DateTime(2026, 11, 12)));
     expect(() => Week.parse('2026-11-10'), throwsFormatException);
   });
@@ -179,7 +173,7 @@ void main() {
   });
 
   test('cancelling the folder picker links nothing', () async {
-    provider.folder = null;
+    provider.pickedFolder = null;
     final backup = open();
     expect(await backup.linkFolder(), isFalse);
     expect(backup.link, isNull);
@@ -379,12 +373,12 @@ void main() {
     expect(provider.writtenTo, [week]);
     expect(provider.released, isEmpty);
 
-    provider.folder = (uri: 'content://com.google.android.apps.docs.storage/tree/acc%3D1%3Bdoc%3Dother', name: 'Other');
+    provider.pickedFolder = (uri: 'content://com.google.android.apps.docs.storage/tree/acc%3D1%3Bdoc%3Dother', name: 'Other');
     await backup.linkFolder();
     expect(provider.released, [FakeProvider.backups.uri]);
     expect(folderLink(backup).folder.name, 'Other');
     expect(provider.created, hasLength(2));
-    expect(latest(backup).doc.uri, startsWith(provider.folder!.uri));
+    expect(latest(backup).doc.uri, startsWith(provider.pickedFolder!.uri));
   });
 
   test('a last backup that claims a time still to come backs up, as after the clock was set back', () async {
@@ -435,7 +429,7 @@ void main() {
     logSets(2);
 
     provider.picking = Completer();
-    provider.folder = (uri: 'content://com.google.android.apps.docs.storage/tree/acc%3D1%3Bdoc%3Dother', name: 'Other');
+    provider.pickedFolder = (uri: 'content://com.google.android.apps.docs.storage/tree/acc%3D1%3Bdoc%3Dother', name: 'Other');
     final changing = backup.linkFolder();
     final leaving = backup.backUpIfChanged();
     await pumpEventQueue();
@@ -445,7 +439,7 @@ void main() {
     await changing;
     await leaving;
     expect(provider.released, [FakeProvider.backups.uri]);
-    expect(latest(backup).doc.uri, startsWith(provider.folder!.uri));
+    expect(latest(backup).doc.uri, startsWith(provider.pickedFolder!.uri));
     expect(provider.setsIn(latest(backup).doc.uri, today), hasLength(2));
     expect(provider.writtenTo, isEmpty);
     expect(folderLink(open()).folder.name, 'Other');

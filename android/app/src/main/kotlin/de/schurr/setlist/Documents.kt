@@ -61,7 +61,6 @@ class Documents(private val activity: Activity) : MethodChannel.MethodCallHandle
     private fun pick(next: Picking, intent: Intent, near: Uri?) {
         picking?.cancel()
         picking = next
-        // A guess that the picker honours it for Drive. A picker that ignores it opens where it last was.
         if (near != null) intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, if (DocumentsContract.isTreeUri(near)) folderDocument(near) else near)
         activity.startActivityForResult(intent, next.request)
     }
@@ -85,7 +84,6 @@ class Documents(private val activity: Activity) : MethodChannel.MethodCallHandle
                 Log.w(TAG, "no lasting permission on a folder from ${uri.authority}: $e")
                 pending.result.error("denied", e.toString(), null)
             }
-            // The picker's grant lasts while the activity does, which covers this one read, so nothing is persisted.
             is Picking.Copy -> offMain(pending.result, null) {
                 read(uri, pending.to)
                 true
@@ -94,7 +92,7 @@ class Documents(private val activity: Activity) : MethodChannel.MethodCallHandle
         return true
     }
 
-    /** Makes a new document named [name] in the folder and fills it from [from], so no empty file ever carries the name. It never looks for an existing document by name: on Drive a second create makes a duplicate with the same name, and a listing can come back empty while it is still loading (measured 2026-11-15). */
+    /** Never looks for an existing document by name: on Drive a second create makes a duplicate with the same name, and a listing can come back empty while it is still loading (measured 2026-11-15). */
     private fun copyInto(tree: Uri, name: String, from: File): Map<String, String> {
         refuseBinned(tree)
         val doc = DocumentsContract.createDocument(resolver, folderDocument(tree), MIME, name) ?: throw FileNotFoundException("no document created in the folder")
@@ -143,11 +141,6 @@ class Documents(private val activity: Activity) : MethodChannel.MethodCallHandle
         }
     }
 
-    /**
-     * Whether a persisted read and write permission still covers [uri]: its tree for a folder or a document in it, the document itself for the 0.2 file.
-     *
-     * This, not the exception, decides `denied` for a call on a linked document: under a tree grant, a document the lifter deleted or moved out of the folder may surface as a SecurityException while the grant is still held.
-     */
     private fun holdsGrant(uri: Uri): Boolean = resolver.persistedUriPermissions.any { grant ->
         grant.isReadPermission && grant.isWritePermission && if (DocumentsContract.isTreeUri(uri)) {
             DocumentsContract.isTreeUri(grant.uri) && grant.uri.authority == uri.authority && DocumentsContract.getTreeDocumentId(grant.uri) == DocumentsContract.getTreeDocumentId(uri)
@@ -156,11 +149,7 @@ class Documents(private val activity: Activity) : MethodChannel.MethodCallHandle
         }
     }
 
-    /**
-     * Throws [Binned] when the folder behind a tree URI, or behind a document in it, is in the Drive bin. Drive keeps creating and writing documents in a binned folder without complaint and empties the bin after 30 days, and a binned folder loses its move flag (measured 2026-11-15: flags 332 live, 12 binned, 332 restored). Drive only, because another provider may never offer move on a folder.
-     *
-     * Only that evidence refuses. A flags query that fails lets the write go ahead and decide.
-     */
+    /** Throws [Binned] when the folder behind a tree URI, or behind a document in it, is in the Drive bin. Drive keeps creating and writing documents in a binned folder without complaint and empties the bin after 30 days, and a binned folder loses its move flag (measured 2026-11-15: flags 332 live, 12 binned, 332 restored). Drive only, because another provider may never offer move on a folder. */
     private fun refuseBinned(tree: Uri) {
         if (tree.authority != DRIVE) return
         val flags = try {
@@ -173,7 +162,6 @@ class Documents(private val activity: Activity) : MethodChannel.MethodCallHandle
 
     private class Binned : Exception("the backup folder is in the Drive bin")
 
-    /** The folder a tree URI points at, as a document. */
     private fun folderDocument(tree: Uri): Uri = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
 
     private fun displayName(uri: Uri): String? = try {
@@ -182,7 +170,6 @@ class Documents(private val activity: Activity) : MethodChannel.MethodCallHandle
         null
     }
 
-    /** Runs [work] off the main thread and answers with what it returns. A failure answers `binned` for a folder in the Drive bin, `denied` when the persisted grant behind [granted] is gone, and `failed` for everything else. */
     private fun offMain(result: MethodChannel.Result, granted: Uri?, work: () -> Any?) {
         io.execute {
             try {

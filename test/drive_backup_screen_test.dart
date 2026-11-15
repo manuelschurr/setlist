@@ -25,7 +25,7 @@ void main() {
   Uint8List? restored;
 
   Future<void> openScreen(WidgetTester tester) async {
-    backup = DriveBackup(dbPath: store.path!, store: () => store, clock: () => DateTime(2026, 11, 11, 18));
+    backup = DriveBackup(dbPath: store.path!, store: () => store, weekClock: () => DateTime(2026, 11, 11, 18));
     final home = Home(day: Day.of(DateTime.now()), alarm: FakeAlarm(), restore: (path) => restored = File(path).readAsBytesSync(), backup: backup);
     await tester.pumpWidget(MaterialApp(home: DriveBackupScreen(home: home)));
   }
