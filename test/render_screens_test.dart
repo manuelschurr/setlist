@@ -103,4 +103,51 @@ void main() {
     ));
     await shot(tester, '05-dark');
   }, skip: out == null);
+
+  testWidgets('render a superset day', (tester) async {
+    await tester.runAsync(_loadFonts);
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.8125;
+    addTearDown(tester.view.reset);
+
+    final store = Store.inMemory();
+    addTearDown(store.close);
+    final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, category: 'Legs');
+    final bench = store.createExercise(name: 'Incline Dumbbell Bench Press', kind: ExerciseKind.weightReps, category: 'Chest');
+    final row = store.createExercise(name: 'Chest Supported Row', kind: ExerciseKind.weightReps, category: 'Back');
+    final raise = store.createExercise(name: 'Lateral Dumbbell Raise', kind: ExerciseKind.weightReps, category: 'Shoulders');
+    final curl = store.createExercise(name: 'Cable Curl', kind: ExerciseKind.weightReps, category: 'Arms');
+    final pushdown = store.createExercise(name: 'Triceps Pushdown', kind: ExerciseKind.weightReps, category: 'Arms');
+    SetEntry plan(num w, int r) => SetEntry(grams: (w * 1000).round(), reps: r);
+    store.saveDay(Workout(day: today, entries: [
+      Slot(squat, [kg(34, 5), kg(34, 5), kg(34, 5)]),
+      Superset([
+        Slot(bench, [kg(13, 10), plan(13, 10), plan(13, 10)]),
+        Slot(row, [kg(30, 10), plan(30, 10), plan(30, 10)]),
+      ]),
+      Slot(raise, [plan(8, 15), plan(8, 15)]),
+      Superset([
+        Slot(curl, [plan(15, 12), plan(15, 12)]),
+        Slot(pushdown, [plan(20, 12), plan(20, 12)]),
+      ]),
+    ]));
+
+    Future<void> open(Brightness brightness) => tester.pumpWidget(RepaintBoundary(
+      key: boundary,
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: setlistTheme(brightness),
+        home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today),
+      ),
+    ));
+
+    await open(Brightness.light);
+    await shot(tester, '06-superset');
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -500));
+    await shot(tester, '07-superset-scrolled');
+
+    await tester.pumpWidget(const SizedBox());
+    await open(Brightness.dark);
+    await shot(tester, '08-superset-dark');
+  }, skip: out == null);
 }

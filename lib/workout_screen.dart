@@ -338,14 +338,17 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
                       switch (rows[i]) {
                         case ExerciseRow(:final exercise):
                           id = exercise;
-                        case SupersetTop(:final superset) || SupersetBottom(:final superset):
-                          return SizedBox.shrink(key: ValueKey((rows[i].runtimeType, superset.slots.first.exercise.id)));
+                        case SupersetTop(:final superset):
+                          return _SupersetHeader(key: ValueKey((SupersetTop, superset.slots.first.exercise.id)), index: i, superset: superset);
+                        case SupersetBottom(:final superset):
+                          return _SupersetFooter(key: ValueKey((SupersetBottom, superset.slots.first.exercise.id)));
                       }
                       final slot = workout.slotOf(id)!;
                       return _SlotCard(
                         key: _cardKeys.putIfAbsent(id, GlobalKey.new),
                         index: i,
                         slot: slot,
+                        framed: workout.entryOf(id) is Superset,
                         focus: _state.focus,
                         lastTime: alignLastTime(slot.sets, _lastTimeOf(id)),
                         collapsed: _collapsed(slot),
@@ -369,11 +372,70 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
 
 enum _CardAction { history, edit, remove }
 
+/// A superset's frame is drawn by three kinds of list row that meet edge to edge, so it reads as one shape while each part stays its own row for the drag: [_SupersetHeader] on top, the frame's sides around each of its cards, and [_SupersetFooter] below. The frame lines up with plain cards, and the cards inside are inset by [_frameSide].
+const _cardSide = 12.0;
+const _frameSide = 8.0;
+const _frameRadius = Radius.circular(16);
+
+/// A quiet tint of the primary colour, well below the focused row's highlight, so a superset reads as a group without competing with the set being edited.
+Color _frameColor(ColorScheme scheme) => Color.alphaBlend(scheme.primary.withValues(alpha: 0.10), scheme.surface);
+
+class _SupersetHeader extends StatelessWidget {
+  const _SupersetHeader({super.key, required this.index, required this.superset});
+
+  final int index;
+  final Superset superset;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(_cardSide, 8, _cardSide, 0),
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: _frameColor(theme.colorScheme), borderRadius: const BorderRadius.vertical(top: _frameRadius)),
+        child: SizedBox(
+          height: 48,
+          child: Row(
+            children: [
+              ReorderableDragStartListener(
+                index: index,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(_frameSide + 14, 12, 14, 12),
+                  child: Icon(Icons.drag_indicator, semanticLabel: 'Drag to reorder superset ${namesOf([superset])}'),
+                ),
+              ),
+              Text('Superset', style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.primary)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SupersetFooter extends StatelessWidget {
+  const _SupersetFooter({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(_cardSide, 0, _cardSide, 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: _frameColor(Theme.of(context).colorScheme), borderRadius: const BorderRadius.vertical(bottom: _frameRadius)),
+        child: const SizedBox(height: 12, width: double.infinity),
+      ),
+    );
+  }
+}
+
 class _SlotCard extends StatelessWidget {
-  const _SlotCard({super.key, required this.index, required this.slot, required this.focus, required this.lastTime, required this.collapsed, required this.onToggle, required this.onAction, required this.onCommand});
+  const _SlotCard({super.key, required this.index, required this.slot, required this.framed, required this.focus, required this.lastTime, required this.collapsed, required this.onToggle, required this.onAction, required this.onCommand});
 
   final int index;
   final Slot slot;
+
+  /// The card sits inside a superset's frame and draws the frame's sides around itself.
+  final bool framed;
   final SetRef? focus;
   final List<SetEntry?> lastTime;
   final bool collapsed;
@@ -408,6 +470,7 @@ class _SlotCard extends StatelessWidget {
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             slot.finished ? Icon(Icons.check_circle, color: theme.colorScheme.primary, semanticLabel: 'Finished') : Text('${slot.doneCount}/${slot.sets.length}', style: theme.textTheme.labelLarge),
             PopupMenuButton<_CardAction>(
               tooltip: 'More for ${slot.exercise.name}',
@@ -422,8 +485,8 @@ class _SlotCard extends StatelessWidget {
         ),
       ),
     );
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    final card = Card(
+      margin: EdgeInsets.symmetric(horizontal: framed ? _frameSide : _cardSide, vertical: 4),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -461,6 +524,11 @@ class _SlotCard extends StatelessWidget {
           ],
         ],
       ),
+    );
+    if (!framed) return card;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: _cardSide),
+      child: ColoredBox(color: _frameColor(theme.colorScheme), child: card),
     );
   }
 }
@@ -876,6 +944,9 @@ class _TextDialogState extends State<_TextDialog> {
 
 const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/// The exercises of [entries] on one line, as the history and the copy tiles show a day: a superset's names joined with " + ", entries with ", ".
+String namesOf(Iterable<Entry> entries) => entries.map((e) => e.slots.map((s) => s.exercise.name).join(' + ')).join(', ');
 
 String dayLabel(Day day) {
   final now = DateTime.now();

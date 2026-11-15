@@ -33,6 +33,8 @@ Finder inPanel(Finder finder) => find.descendant(of: panel, matching: finder);
 
 Finder card(String name, {bool skipOffstage = true}) => find.ancestor(of: find.text(name, skipOffstage: skipOffstage), matching: find.byType(Card, skipOffstage: skipOffstage));
 
+Finder handle(String label) => find.byWidgetPredicate((w) => w is Icon && w.semanticLabel == 'Drag to reorder $label', skipOffstage: false);
+
 /// Exercise names in the order their cards stand on screen.
 List<String> cardOrder(WidgetTester tester, List<String> names) => [...names]..sort((a, b) => tester.getTopLeft(card(a, skipOffstage: false)).dy.compareTo(tester.getTopLeft(card(b, skipOffstage: false)).dy));
 
@@ -41,6 +43,7 @@ void main() {
   late FakeAlarm alarm;
   late Exercise squat;
   late Exercise bench;
+  late Exercise row;
 
   setUp(() {
     store = Store.inMemory();
@@ -48,6 +51,7 @@ void main() {
     alarm = FakeAlarm();
     squat = store.createExercise(name: 'Squat', kind: ExerciseKind.weightReps);
     bench = store.createExercise(name: 'Bench press', kind: ExerciseKind.weightReps);
+    row = store.createExercise(name: 'Row', kind: ExerciseKind.weightReps);
   });
 
   Future<void> openToday(WidgetTester tester) async {
@@ -176,16 +180,14 @@ void main() {
   });
 
   testWidgets('dragging a card by its handle moves it in one gesture', (tester) async {
-    final row = store.createExercise(name: 'Row', kind: ExerciseKind.weightReps);
     store.saveDay(Workout(day: today, entries: [Slot(squat, sets(3, 100, 5)), Slot(bench, sets(3, 80, 8)), Slot(row, sets(3, 60, 10))]));
     await openToday(tester);
     final names = ['Squat', 'Bench press', 'Row'];
     expect(cardOrder(tester, names), names);
 
-    final handle = find.descendant(of: card('Row', skipOffstage: false), matching: find.byIcon(Icons.drag_indicator, skipOffstage: false));
-    await tester.ensureVisible(handle);
+    await tester.ensureVisible(handle('Row'));
     await tester.pumpAndSettle();
-    final gesture = await tester.startGesture(tester.getCenter(handle));
+    final gesture = await tester.startGesture(tester.getCenter(handle('Row')));
     for (var i = 0; i < 40; i++) {
       await gesture.moveBy(const Offset(0, -30));
       await tester.pump(const Duration(milliseconds: 16));
@@ -228,7 +230,6 @@ void main() {
   });
 
   testWidgets('when the focus moves to an exercise off the screen, its card scrolls into view', (tester) async {
-    final row = store.createExercise(name: 'Row', kind: ExerciseKind.weightReps);
     store.saveDay(Workout(day: today, entries: [Slot(squat, sets(5, 100, 5)), Slot(bench, sets(5, 80, 8)), Slot(row, sets(1, 60, 10))]));
     await openToday(tester);
     await tester.ensureVisible(find.text('60 kg × 10', skipOffstage: false));
@@ -328,5 +329,25 @@ void main() {
     expect(find.text('e1RM 118.1 kg'), findsOneWidget);
     expect(find.text('New best'), findsOneWidget);
     expect(tester.getTopLeft(find.text('New best')).dy, lessThan(tester.getTopLeft(find.text('e1RM 105.9 kg')).dy));
+  });
+
+  testWidgets('a superset draws its cards inside one frame under a Superset strip, inset from plain cards', (tester) async {
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 100, 5)), Superset([Slot(bench, sets(1, 80, 8)), Slot(row, sets(1, 60, 10))])]));
+    await openToday(tester);
+    expect(find.text('Superset'), findsOneWidget);
+    expect(handle('superset Bench press + Row'), findsOneWidget);
+
+    final squatCard = tester.getRect(card('Squat'));
+    final benchCard = tester.getRect(card('Bench press'));
+    final rowCard = tester.getRect(card('Row'));
+    expect(tester.getRect(find.text('Superset')).bottom, lessThan(benchCard.top));
+    expect(benchCard.bottom, lessThanOrEqualTo(rowCard.top));
+    expect(benchCard.left, greaterThan(squatCard.left));
+    expect(benchCard.right, lessThan(squatCard.right));
+    for (final name in ['Bench press', 'Row']) {
+      expect(find.descendant(of: card(name), matching: find.text('Add set')), findsOneWidget);
+      expect(find.byTooltip('More for $name'), findsOneWidget);
+      expect(handle(name), findsOneWidget);
+    }
   });
 }
