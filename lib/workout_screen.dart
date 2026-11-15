@@ -70,6 +70,18 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
 
   final Map<ExerciseId, GlobalKey> _cardKeys = {};
 
+  /// The superset whose header strip is being dragged, and the row it was picked up from. Its cards and footer stay in the list at zero height while it floats, so the drop indices still count them, and they open again in the frame that the drop lands, not first where the superset was.
+  ({int from, Superset superset})? _lifted;
+
+  bool _folded(int row) => switch (_lifted) {
+    (:final from, :final superset) => row > from && row <= from + superset.slots.length + 1,
+    null => false,
+  };
+
+  void _land() {
+    if (_lifted != null) setState(() => _lifted = null);
+  }
+
   late List<Workout> _recent = _loadRecent();
 
   bool get _isHome => widget.day == widget.home.day;
@@ -161,7 +173,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
     RemoveSet() => 'Set removed',
     RemoveExercise() => 'Exercise removed',
     CopyDay() => 'Workout copied',
-    FocusSet() || SetField() || SetWarmup() || SetSetNote() || UnlogSet() || AddSet() || AddExercise() || MoveExercise() || SetNote() || UpdateExercise() => null,
+    FocusSet() || SetField() || SetWarmup() || SetSetNote() || UnlogSet() || AddSet() || AddExercise() || Arrange() || SupersetWith() || SetNote() || UpdateExercise() => null,
   };
 
   Future<T?> _push<T>(Widget screen) async {
@@ -235,9 +247,51 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
       case _CardAction.edit:
         final edited = await editExercise(context, widget.store, slot.exercise);
         if (edited != null && mounted) _dispatch(UpdateExercise(edited));
+      case _CardAction.superset:
+        final picked = await _pickPartner(slot);
+        if (picked != null && mounted) _dispatch(SupersetWith(slot.exercise.id, picked));
       case _CardAction.remove:
         _dispatch(RemoveExercise(slot.exercise.id));
     }
+  }
+
+  /// What "Superset with…" offers for [slot]: every exercise of the day outside [slot]'s own superset, or every other one when [slot] is plain.
+  List<Slot> _partnersOf(Slot slot) {
+    final own = _state.workout.entryOf(slot.exercise.id)!.slots;
+    return [
+      for (final other in _state.workout.slots)
+        if (!own.any((s) => s.exercise.id == other.exercise.id)) other,
+    ];
+  }
+
+  /// An exercise already in another superset shows that superset under its name, because picking it takes it out of there.
+  Future<ExerciseId?> _pickPartner(Slot slot) {
+    final workout = _state.workout;
+    return showModalBottomSheet<ExerciseId>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+              child: Text('Superset ${slot.exercise.name} with', style: Theme.of(context).textTheme.titleMedium),
+            ),
+            for (final partner in _partnersOf(slot))
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                title: Text(partner.exercise.name),
+                subtitle: switch (workout.entryOf(partner.exercise.id)) {
+                  final Superset other => Text(namesOf([other])),
+                  _ => null,
+                },
+                onTap: () => Navigator.pop(context, partner.exercise.id),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _reveal(ExerciseId id) => WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -274,6 +328,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
   @override
   Widget build(BuildContext context) {
     final workout = _state.workout;
+    final rows = listRows(workout);
     final note = workout.note.isEmpty ? null : ListTile(leading: const Icon(Icons.notes), title: Text(workout.note), onTap: _editNote);
     return Scaffold(
       appBar: AppBar(
@@ -321,32 +376,75 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
                       for (final past in _recent) CopyTile(workout: past, onCopy: () => _copy(past)),
                     ],
                   )
-                : ReorderableListView.builder(
-                    buildDefaultDragHandles: false,
-                    // Every card stays built, so a card the focus moves to can be scrolled to. A day has about ten exercises at most.
-                    scrollCacheExtent: const ScrollCacheExtent.pixels(20000),
-                    padding: const EdgeInsets.only(top: 4, bottom: 16),
-                    itemCount: workout.slots.length,
-                    onReorderItem: (from, to) => _dispatch(MoveExercise(from, to)),
-                    header: note,
-                    itemBuilder: (context, i) {
-                      final slot = workout.slots[i];
-                      final id = slot.exercise.id;
-                      return _SlotCard(
-                        key: _cardKeys.putIfAbsent(id, GlobalKey.new),
-                        index: i,
-                        slot: slot,
-                        focus: _state.focus,
-                        lastTime: alignLastTime(slot.sets, _lastTimeOf(id)),
-                        collapsed: _collapsed(slot),
-                        onToggle: () => setState(() => _collapsedByHand[id] = !_collapsed(slot)),
-                        onAction: (action) => _cardAction(slot, action),
-                        onCommand: _dispatch,
-                      );
-                    },
-                    footer: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                      child: OutlinedButton.icon(onPressed: _addExercise, icon: const Icon(Icons.add), label: const Text('Add exercise'), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48))),
+                // A cancelled drag reports no end and no drop.
+                : Listener(
+                    onPointerCancel: (_) => _land(),
+                    child: ReorderableListView.builder(
+                      buildDefaultDragHandles: false,
+                      // Every card stays built, so a card the focus moves to can be scrolled to. A day has about ten exercises at most.
+                      scrollCacheExtent: const ScrollCacheExtent.pixels(20000),
+                      padding: const EdgeInsets.only(top: 4, bottom: 16),
+                      itemCount: rows.length,
+                      onReorderStart: (i) {
+                        if (rows[i] case SupersetTop(:final superset)) setState(() => _lifted = (from: i, superset: superset));
+                      },
+                      // A drop back where the drag started reports no reorder, so nothing else would open the folded rows.
+                      onReorderEnd: (i) {
+                        final lifted = _lifted;
+                        if (lifted != null && (i > lifted.from ? i - 1 : i) == lifted.from) _land();
+                      },
+                      onReorderItem: (from, to) {
+                        _land();
+                        final layout = layoutAfterDrop(workout, from, to);
+                        if (layout != null) _dispatch(Arrange(layout));
+                      },
+                      proxyDecorator: (child, i, animation) => AnimatedBuilder(
+                        animation: animation,
+                        builder: (context, child) {
+                          final lift = 6 * Curves.easeInOut.transform(animation.value);
+                          return switch (rows[i]) {
+                            SupersetTop(:final superset) => _SupersetHeader(index: i, superset: superset, lift: lift),
+                            _ => Material(elevation: lift, child: child),
+                          };
+                        },
+                        child: _Lifted(child: child),
+                      ),
+                      header: note,
+                      itemBuilder: (context, i) {
+                        final row = rows[i];
+                        final key = switch (row) {
+                          ExerciseRow(:final exercise) => _cardKeys.putIfAbsent(exercise, GlobalKey.new),
+                          SupersetTop(:final superset) || SupersetBottom(:final superset) => ValueKey((row.runtimeType, superset.slots.first.exercise.id)),
+                        };
+                        if (_folded(i)) return SizedBox.shrink(key: key);
+                        final ExerciseId id;
+                        switch (row) {
+                          case ExerciseRow(:final exercise):
+                            id = exercise;
+                          case SupersetTop(:final superset):
+                            return _SupersetHeader(key: key, index: i, superset: superset);
+                          case SupersetBottom():
+                            return _SupersetFooter(key: key);
+                        }
+                        final slot = workout.slotOf(id)!;
+                        return _SlotCard(
+                          key: key,
+                          index: i,
+                          slot: slot,
+                          framed: workout.entryOf(id) is Superset,
+                          canSuperset: _partnersOf(slot).isNotEmpty,
+                          focus: _state.focus,
+                          lastTime: alignLastTime(slot.sets, _lastTimeOf(id)),
+                          collapsed: _collapsed(slot),
+                          onToggle: () => setState(() => _collapsedByHand[id] = !_collapsed(slot)),
+                          onAction: (action) => _cardAction(slot, action),
+                          onCommand: _dispatch,
+                        );
+                      },
+                      footer: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                        child: OutlinedButton.icon(onPressed: _addExercise, icon: const Icon(Icons.add), label: const Text('Add exercise'), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48))),
+                      ),
                     ),
                   ),
           ),
@@ -357,13 +455,105 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
   }
 }
 
-enum _CardAction { history, edit, remove }
+enum _CardAction { history, edit, superset, remove }
+
+/// A superset's frame is drawn by three kinds of list row that meet edge to edge, so it reads as one shape while each part stays its own row for the drag: [_SupersetHeader] on top, the frame's sides around each of its cards, and [_SupersetFooter] below. The frame lines up with plain cards, and the cards inside are inset by [_frameSide].
+const _cardSide = 12.0;
+const _frameSide = 8.0;
+const _frameRadius = Radius.circular(16);
+
+/// A quiet tint of the primary colour, well below the focused row's highlight, so a superset reads as a group without competing with the set being edited.
+Color _frameColor(ColorScheme scheme) => Color.alphaBlend(scheme.primary.withValues(alpha: 0.10), scheme.surface);
+
+/// Marks the floating copy of a dragged row, which draws no frame around a card, because the card may land outside every frame.
+class _Lifted extends InheritedWidget {
+  const _Lifted({required super.child});
+
+  static bool of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<_Lifted>() != null;
+
+  @override
+  bool updateShouldNotify(_Lifted oldWidget) => false;
+}
+
+/// With [lift], the strip floats on its own during a drag at that elevation, rounded all round, and its exercises fold into it as one line of names.
+class _SupersetHeader extends StatelessWidget {
+  const _SupersetHeader({super.key, required this.index, required this.superset, this.lift});
+
+  final int index;
+  final Superset superset;
+  final double? lift;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final names = namesOf([superset]);
+    final lift = this.lift;
+    final title = Text('Superset', style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.primary));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(_cardSide, 8, _cardSide, 0),
+      child: Material(
+        color: _frameColor(theme.colorScheme),
+        elevation: lift ?? 0,
+        borderRadius: lift == null ? const BorderRadius.vertical(top: _frameRadius) : const BorderRadius.all(_frameRadius),
+        child: SizedBox(
+          height: 48,
+          child: Row(
+            children: [
+              ReorderableDragStartListener(
+                index: index,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(_frameSide + 14, 12, 14, 12),
+                  child: Icon(Icons.drag_indicator, semanticLabel: 'Drag to reorder superset $names'),
+                ),
+              ),
+              if (lift == null)
+                title
+              else
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      title,
+                      Text(names, style: theme.textTheme.bodyMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The clear space under the cap belongs to this row, so the row is taller than half a collapsed card. While a dragged card's bottom is still in the lower half of its own place, the list pulls the gap back there unless the card's top sits in the upper half of a row, so a shorter row would leave a card from right below almost no way to join the end of the superset.
+class _SupersetFooter extends StatelessWidget {
+  const _SupersetFooter({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(_cardSide, 0, _cardSide, 32),
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: _frameColor(Theme.of(context).colorScheme), borderRadius: const BorderRadius.vertical(bottom: _frameRadius)),
+        child: const SizedBox(height: 12, width: double.infinity),
+      ),
+    );
+  }
+}
 
 class _SlotCard extends StatelessWidget {
-  const _SlotCard({super.key, required this.index, required this.slot, required this.focus, required this.lastTime, required this.collapsed, required this.onToggle, required this.onAction, required this.onCommand});
+  const _SlotCard({super.key, required this.index, required this.slot, required this.framed, required this.canSuperset, required this.focus, required this.lastTime, required this.collapsed, required this.onToggle, required this.onAction, required this.onCommand});
 
   final int index;
   final Slot slot;
+
+  /// The card sits inside a superset's frame and draws the frame's sides around itself.
+  final bool framed;
+
+  /// The day has an exercise "Superset with…" could offer.
+  final bool canSuperset;
   final SetRef? focus;
   final List<SetEntry?> lastTime;
   final bool collapsed;
@@ -398,22 +588,24 @@ class _SlotCard extends StatelessWidget {
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             slot.finished ? Icon(Icons.check_circle, color: theme.colorScheme.primary, semanticLabel: 'Finished') : Text('${slot.doneCount}/${slot.sets.length}', style: theme.textTheme.labelLarge),
             PopupMenuButton<_CardAction>(
               tooltip: 'More for ${slot.exercise.name}',
               onSelected: onAction,
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: _CardAction.history, child: Text('History')),
-                PopupMenuItem(value: _CardAction.edit, child: Text('Edit exercise')),
-                PopupMenuItem(value: _CardAction.remove, child: Text('Remove')),
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: _CardAction.history, child: Text('History')),
+                const PopupMenuItem(value: _CardAction.edit, child: Text('Edit exercise')),
+                if (canSuperset) const PopupMenuItem(value: _CardAction.superset, child: Text('Superset with…')),
+                const PopupMenuItem(value: _CardAction.remove, child: Text('Remove')),
               ],
             ),
           ],
         ),
       ),
     );
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    final card = Card(
+      margin: EdgeInsets.symmetric(horizontal: framed ? _frameSide : _cardSide, vertical: 4),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -451,6 +643,11 @@ class _SlotCard extends StatelessWidget {
           ],
         ],
       ),
+    );
+    if (!framed) return card;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: _cardSide),
+      child: _Lifted.of(context) ? card : ColoredBox(color: _frameColor(theme.colorScheme), child: card),
     );
   }
 }
@@ -558,6 +755,9 @@ class _Panel extends StatelessWidget {
       final rest = state.workout.restAt(DateTime.now());
       final label = setLabels(slot.sets)[ref.index];
       final working = slot.sets.where((s) => !s.warmup).length;
+      // Asks the rule the log follows, so the panel never names a different exercise than the one the focus moves to.
+      final next = focusAfterLog(state.workout, ref);
+      final then = next == null || next.exercise == ref.exercise ? null : state.workout.entryOf(ref.exercise)!.slots.where((s) => s.exercise.id == next.exercise).firstOrNull?.exercise.name;
       content = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -568,7 +768,12 @@ class _Panel extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(slot.exercise.name, style: theme.textTheme.titleMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    Text(set.warmup ? 'Warm-up' : 'Set $label of $working', style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                    Text(
+                      '${set.warmup ? 'Warm-up' : 'Set $label of $working'}${then == null ? '' : ' · then $then'}',
+                      style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                 ),
               ),
@@ -824,7 +1029,7 @@ class CopyTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       title: Text(dayLabel(workout.day)),
-      subtitle: Text(workout.slots.map((s) => s.exercise.name).join(', '), maxLines: 2, overflow: TextOverflow.ellipsis),
+      subtitle: Text(namesOf(workout.entries), maxLines: 2, overflow: TextOverflow.ellipsis),
       trailing: FilledButton.tonal(onPressed: onCopy, child: const Text('Copy')),
     );
   }
@@ -866,6 +1071,9 @@ class _TextDialogState extends State<_TextDialog> {
 
 const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/// The exercises of [entries] on one line, as the history and the copy tiles show a day: a superset's names joined with " + ", entries with ", ".
+String namesOf(Iterable<Entry> entries) => entries.map((e) => e.slots.map((s) => s.exercise.name).join(' + ')).join(', ');
 
 String dayLabel(Day day) {
   final now = DateTime.now();

@@ -95,6 +95,12 @@ Future<ImportOutcome> importFitNotes({required String backupPath, required Strin
     notes.putIfAbsent(Day.parse(row['date'] as String).iso, () => []).add(row['comment'] as String);
   }
 
+  // FitNotes reads a logged day's superset groups by date and a routine's by routine_section_id, and gives a routine's groups an empty date (WorkoutGroupTable.java in the decompiled sources, docs/research.md S3), so the date tells them apart. A routine's groups belong to the routine, which the import leaves out whole. Rows arrive by group id, so an exercise in two groups on one day stays in the first.
+  final groups = <String, Map<String, int>>{};
+  for (final row in backup.select("SELECT g._id, g.date, ge.exercise_id FROM WorkoutGroupExercise ge JOIN WorkoutGroup g ON g._id = ge.workout_group_id WHERE g.date <> '' ORDER BY g._id, ge._id")) {
+    groups.putIfAbsent(Day.parse(row['date'] as String).iso, () => {}).putIfAbsent('${row['exercise_id']}', () => row['_id'] as int);
+  }
+
   // Map literals keep insertion order, and rows arrive by date then _id, so each day's exercises come out ordered by their smallest set _id, as FitNotes shows them.
   final days = <String, Map<String, List<SetEntry>>>{};
   final rows = backup.select('SELECT _id, exercise_id, date, metric_weight, reps, unit, distance, duration_seconds, is_complete FROM training_log ORDER BY date, _id');
@@ -117,7 +123,6 @@ Future<ImportOutcome> importFitNotes({required String backupPath, required Strin
 
   int count(String from) => backup.select('SELECT COUNT(*) AS n FROM $from').single['n'] as int;
   final leftOut = {
-    'superset groups': count('WorkoutGroup'),
     'routines': count('Routine'),
     'body weight entries': count('BodyWeight'),
     'comments on deleted sets': setComments.values.fold(0, (n, comments) => n + comments.length),
@@ -132,13 +137,30 @@ Future<ImportOutcome> importFitNotes({required String backupPath, required Strin
         ImportedDay(
           day: Day.parse(iso),
           note: notes[iso]?.join('\n') ?? '',
-          slots: [for (final MapEntry(key: exerciseKey, value: sets) in (days[iso] ?? const {}).entries) (exerciseKey: exerciseKey, sets: sets)],
+          entries: _entries(days[iso] ?? const {}, groups[iso] ?? const {}),
         ),
     ],
     defaultWeightStepGrams: defaultStep,
     defaultRest: defaultRest == null ? null : Duration(seconds: defaultRest),
   );
   return (batch: batch, trainingLogRows: rows.length, leftOut: leftOut);
+}
+
+/// A day's [exercises], in the day's order, as entries. The exercises of one group that have sets on the day form a superset, which sits where the first of them sits and keeps the day's order inside. A group with fewer than two of them leaves its exercise plain.
+List<List<ImportedSlot>> _entries(Map<String, List<SetEntry>> exercises, Map<String, int> groupOf) {
+  final members = <int, List<String>>{};
+  for (final key in exercises.keys) {
+    if (groupOf[key] case final group?) members.putIfAbsent(group, () => []).add(key);
+  }
+  final entries = <List<ImportedSlot>>[];
+  final placed = <String>{};
+  for (final key in exercises.keys) {
+    if (placed.contains(key)) continue;
+    final entry = members[groupOf[key]] ?? [key];
+    placed.addAll(entry);
+    entries.add([for (final k in entry) (exerciseKey: k, sets: exercises[k]!)]);
+  }
+  return entries;
 }
 
 const _notABackup = "This file is not a FitNotes backup. Make a backup in FitNotes' settings, then pick its .fitnotes file. A Google Drive automatic backup arrives as a .zip file: unzip it first and pick the .fitnotes file inside.";

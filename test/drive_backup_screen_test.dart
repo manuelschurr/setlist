@@ -27,7 +27,7 @@ void main() {
     addTearDown(provider.dispose);
     final today = Day.of(DateTime.now());
     final squat = store.createExercise(name: 'Squat', kind: ExerciseKind.weightReps);
-    store.saveDay(Workout(day: today, slots: [Slot(squat, const [SetEntry(grams: 100000, reps: 5)])]));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, const [SetEntry(grams: 100000, reps: 5)])]));
     final backup = DriveBackup(dbPath: store.path!, store: () => store);
     Uint8List? restored;
     final home = Home(day: today, alarm: FakeAlarm(), restore: (path) => restored = File(path).readAsBytesSync(), backup: backup);

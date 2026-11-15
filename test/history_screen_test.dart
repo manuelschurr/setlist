@@ -137,4 +137,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(HistoryScreen), findsNothing);
   });
+
+  testWidgets('a day lists a superset\'s names joined with a plus and its entries with commas', (tester) async {
+    final store = Store.inMemory();
+    addTearDown(store.close);
+    final bench = store.createExercise(name: 'Bench press', kind: ExerciseKind.weightReps);
+    final row = store.createExercise(name: 'Row', kind: ExerciseKind.weightReps);
+    final squat = store.createExercise(name: 'Squat', kind: ExerciseKind.weightReps);
+    final done = SetEntry(grams: 80000, reps: 5, status: Done(DateTime.now()));
+    final today = Day.of(DateTime.now());
+    final now = DateTime.now();
+    store.saveDay(Workout(day: Day.of(DateTime(now.year, now.month, now.day - 2)), entries: [Slot(squat, [done]), Superset([Slot(bench, [done]), Slot(row, [done])])]));
+    await tester.pumpWidget(MaterialApp(home: HistoryScreen(store: store, home: Home(day: today, alarm: FakeAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)))));
+    expect(find.text('Squat, Bench press + Row'), findsOneWidget);
+  });
 }
+

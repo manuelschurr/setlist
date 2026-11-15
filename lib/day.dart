@@ -187,13 +187,23 @@ final class Exercise {
   int get hashCode => Object.hash(id, name, kind, category, weightStepGrams, rest);
 }
 
-final class Slot {
+/// One item of a day's list: a plain exercise or a superset.
+sealed class Entry {
+  /// The entry's exercises in round order, so a day's slots in order are its entries flattened.
+  List<Slot> get slots;
+}
+
+/// One exercise in a day with its ordered sets. Directly in [Workout.entries] it is a plain exercise; inside a [Superset] it is one exercise of the round.
+final class Slot extends Entry {
   Slot(this.exercise, List<SetEntry> sets) : sets = List.unmodifiable(sets) {
     if (sets.isEmpty) throw ArgumentError.value(sets, 'sets', 'a slot has at least one set');
   }
 
   final Exercise exercise;
   final List<SetEntry> sets;
+
+  @override
+  late final List<Slot> slots = List.unmodifiable([this]);
 
   bool get finished => sets.every((s) => s.isDone);
 
@@ -214,30 +224,54 @@ final class Slot {
   int get hashCode => Object.hash(exercise, Object.hashAll(sets));
 }
 
+/// Two or more exercises done in turn, one set of each per round. A superset of one cannot be built, so every operation that leaves one exercise makes it a plain [Slot].
+final class Superset extends Entry {
+  Superset(List<Slot> slots) : slots = List.unmodifiable(slots) {
+    if (slots.length < 2) throw ArgumentError.value(slots.length, 'slots', 'a superset holds at least two exercises');
+  }
+
+  @override
+  final List<Slot> slots;
+
+  @override
+  bool operator ==(Object other) => other is Superset && _sameList(other.slots, slots);
+
+  @override
+  int get hashCode => Object.hashAll(slots);
+}
+
+/// A day's arrangement: one inner list per entry, with its exercises in order. One exercise is a plain slot, two or more a superset.
+typedef Layout = List<List<ExerciseId>>;
+
 typedef Rest = ({Exercise exercise, DateTime endsAt});
 
 typedef Summary = ({int doneSets, int volumeGrams, Duration? elapsed});
 
 final class Workout {
-  Workout({required this.day, this.note = '', List<Slot> slots = const []}) : slots = List.unmodifiable(slots) {
+  Workout({required this.day, this.note = '', List<Entry> entries = const []}) : entries = List.unmodifiable(entries), slots = List.unmodifiable([for (final entry in entries) ...entry.slots]) {
     final seen = <ExerciseId>{};
     for (final slot in slots) {
-      if (!seen.add(slot.exercise.id)) throw ArgumentError.value(slot.exercise.name, 'slots', 'an exercise appears at most once per day');
+      if (!seen.add(slot.exercise.id)) throw ArgumentError.value(slot.exercise.name, 'entries', 'an exercise appears at most once per day');
     }
   }
 
   final Day day;
   final String note;
+  final List<Entry> entries;
+
+  /// [entries] flattened: every exercise of the day in workout order.
   final List<Slot> slots;
 
   bool get isEmpty => slots.isEmpty && note.isEmpty;
 
-  int indexOf(ExerciseId exercise) => slots.indexWhere((s) => s.exercise.id == exercise);
+  Layout get layout => [
+    for (final entry in entries) [for (final slot in entry.slots) slot.exercise.id],
+  ];
 
-  Slot? slotOf(ExerciseId exercise) {
-    final i = indexOf(exercise);
-    return i < 0 ? null : slots[i];
-  }
+  Slot? slotOf(ExerciseId exercise) => slots.where((s) => s.exercise.id == exercise).firstOrNull;
+
+  /// The entry that holds [exercise]: its own [Slot] when it is a plain exercise, else its [Superset].
+  Entry? entryOf(ExerciseId exercise) => entries.where((e) => e.slots.any((s) => s.exercise.id == exercise)).firstOrNull;
 
   SetEntry? setAt(SetRef ref) {
     final sets = slotOf(ref.exercise)?.sets;
@@ -252,18 +286,23 @@ final class Workout {
     }
   }
 
-  /// The rest countdown at [now], derived from the log times, never stored. Undo, app restarts and edits during rest therefore need no timer state.
+  /// The rest countdown at [now], derived from the log times, never stored. Undo, app restarts and edits during rest therefore need no timer state. It follows the latest log. In a superset there is none while an exercise after the logged one in the round still has a planned set, because the round is not over, and otherwise it lasts the longest rest of the superset's exercises. [Rest.exercise] is always the exercise of the latest log, which the notification names.
   Rest? restAt(DateTime now) {
     if (_firstPlanned(this) == null) return null;
-    ({DateTime at, Exercise exercise})? latest;
+    ({DateTime at, Slot slot})? latest;
     for (final slot in slots) {
       for (final set in slot.sets) {
-        if (set.status case Done(:final at?) when latest == null || at.isAfter(latest.at)) latest = (at: at, exercise: slot.exercise);
+        if (set.status case Done(:final at?) when latest == null || at.isAfter(latest.at)) latest = (at: at, slot: slot);
       }
     }
     if (latest == null) return null;
-    final endsAt = latest.at.add(latest.exercise.rest);
-    return endsAt.isAfter(now) ? (exercise: latest.exercise, endsAt: endsAt) : null;
+    final exercise = latest.slot.exercise;
+    final round = entryOf(exercise.id)!.slots;
+    final later = round.skip(round.indexWhere((s) => s.exercise.id == exercise.id) + 1);
+    if (later.any((s) => s.sets.any((set) => set.isPlanned))) return null;
+    final rest = round.map((s) => s.exercise.rest).reduce((a, b) => a > b ? a : b);
+    final endsAt = latest.at.add(rest);
+    return endsAt.isAfter(now) ? (exercise: exercise, endsAt: endsAt) : null;
   }
 
   Summary get summary {
@@ -287,10 +326,10 @@ final class Workout {
   }
 
   @override
-  bool operator ==(Object other) => other is Workout && other.day == day && other.note == note && _sameList(other.slots, slots);
+  bool operator ==(Object other) => other is Workout && other.day == day && other.note == note && _sameList(other.entries, entries);
 
   @override
-  int get hashCode => Object.hash(day, note, Object.hashAll(slots));
+  int get hashCode => Object.hash(day, note, Object.hashAll(entries));
 }
 
 /// What the lifter did last time on each set of [today], one entry per set, for the muted text under each row. Warm-ups pair with warm-ups and working sets with working sets, each by its order among its own kind, so adding a warm-up today does not shift every working set's comparison by one. A set with no counterpart gets null.
@@ -372,11 +411,17 @@ final class RemoveExercise extends Command {
   final ExerciseId exercise;
 }
 
-/// Dragging a card. [to] is the index the card ends up at, counted after it is removed from [from].
-final class MoveExercise extends Command {
-  const MoveExercise(this.from, this.to);
-  final int from;
-  final int to;
+/// Puts the day's exercises in [layout]'s order and grouping. Applies only when [layout] names exactly the day's exercises, each once, with no empty inner list, so a layout from a stale drag changes nothing. The focus stays on its set.
+final class Arrange extends Command {
+  const Arrange(this.layout);
+  final Layout layout;
+}
+
+/// The card menu's "Superset with…". [added] moves to right after [anchor] and joins [anchor]'s superset, or the two start a new one. A superset [added] leaves with one exercise becomes that plain exercise. Changes nothing when either is not in the day, when they are the same, or when [added] is already in [anchor]'s superset. The focus stays on its set.
+final class SupersetWith extends Command {
+  const SupersetWith(this.anchor, this.added);
+  final ExerciseId anchor;
+  final ExerciseId added;
 }
 
 final class CopyDay extends Command {
@@ -408,9 +453,10 @@ DayState reduce(DayState state, Command command) {
     RemoveSet(:final ref) => _removeSet(state, ref),
     AddExercise(:final exercise, :final lastSession) => _addExercise(state, exercise, lastSession),
     RemoveExercise(:final exercise) => _removeExercise(state, exercise),
-    MoveExercise(:final from, :final to) => _next(state, _move(w, from, to), state.focus),
+    Arrange(:final layout) => _next(state, _arrange(w, layout), state.focus),
+    SupersetWith(:final anchor, :final added) => _next(state, _supersetWith(w, anchor, added), state.focus),
     CopyDay(:final source) => _copyDay(state, source),
-    SetNote(:final note) => note == w.note ? state : _next(state, Workout(day: w.day, note: note, slots: w.slots), state.focus),
+    SetNote(:final note) => note == w.note ? state : _next(state, Workout(day: w.day, note: note, entries: w.entries), state.focus),
     UpdateExercise(:final exercise) => _next(state, _updateExercise(w, exercise), state.focus),
   };
 }
@@ -419,21 +465,20 @@ DayState _next(DayState state, Workout workout, SetRef? focus) => identical(work
 
 /// The cascade. Sets [field] of the set at [ref] to [value], and sets [value] on every later set of the same exercise that is still planned and whose [field] held the edited set's old value. Done sets never change by cascade. Sets with another value are left alone, so warm-ups and back-off sets survive an edit to the working sets. The edited set itself may be done, so correcting a logged set still updates the planned ones after it. Returns [w] itself when nothing changes.
 Workout _cascade(Workout w, SetRef ref, Field field, int value) {
+  final slot = w.slotOf(ref.exercise);
   final edited = w.setAt(ref);
-  if (edited == null) return w;
+  if (slot == null || edited == null) return w;
   final old = field.read(edited);
   if (old == value) return w;
-  final i = w.indexOf(ref.exercise);
-  final sets = w.slots[i].sets;
-  final next = [...sets];
+  final next = [...slot.sets];
   next[ref.index] = field.write(edited, value);
-  for (var j = ref.index + 1; j < sets.length; j++) {
-    if (sets[j].isPlanned && field.read(sets[j]) == old) next[j] = field.write(sets[j], value);
+  for (var j = ref.index + 1; j < next.length; j++) {
+    if (next[j].isPlanned && field.read(next[j]) == old) next[j] = field.write(next[j], value);
   }
-  return _withSlot(w, i, Slot(w.slots[i].exercise, next));
+  return _withSlot(w, Slot(slot.exercise, next));
 }
 
-/// Focus moves only when the logged set held the focus, or when the focus was on no planned set. It then goes to the next planned set after [ref] in the same exercise, else to the first planned set of that exercise (one skipped within it), else to the first planned set from the top of the workout (an exercise skipped for a busy rack comes back next), else to null and the panel shows the summary. Checking the circle on some other row leaves the panel where it is. Logging a set that is already done keeps its original time and still moves focus; that is the panel's "Next set" button on a corrected set.
+/// Focus moves only when the logged set held the focus, or when the focus was on no planned set, and then to [focusAfterLog]. Checking the circle on some other row leaves the panel where it is. Logging a set that is already done keeps its original time and still moves focus; that is the panel's "Next set" button on a corrected set.
 DayState _log(DayState state, SetRef ref, DateTime at) {
   final w = state.workout;
   final target = w.setAt(ref);
@@ -441,7 +486,22 @@ DayState _log(DayState state, SetRef ref, DateTime at) {
   final logged = target.isDone ? w : _replaceSet(w, ref, (s) => s.copyWith(status: Done(at)));
   final current = state.focus;
   final advance = current == null || current == ref || w.setAt(current)?.isPlanned != true;
-  return _next(state, logged, advance ? _plannedFrom(logged, ref.exercise, ref.index + 1) : current);
+  return _next(state, logged, advance ? focusAfterLog(logged, ref) : current);
+}
+
+/// Where the focus goes when the set at [ref] is logged in [workout], whether that set is still planned or already done. Logging moves the focus here, and the panel names the exercise it will land on, so the two never disagree.
+///
+/// In a superset it goes to the next exercise of the round after [ref]'s, wrapping to the first, that has a planned set, and there to its first planned set. When no other exercise of the superset has one, and for a plain exercise, it goes to the next planned set after [ref] in its own exercise, else to the first planned set of that exercise (one skipped within it), else to the first planned set from the top of the workout (an exercise skipped for a busy rack comes back next), else to null and the panel shows the summary.
+SetRef? focusAfterLog(Workout workout, SetRef ref) {
+  final logged = _replaceSet(workout, ref, (s) => s.isDone ? s : s.copyWith(status: const Done()));
+  final round = logged.entryOf(ref.exercise)?.slots ?? const <Slot>[];
+  final at = round.indexWhere((s) => s.exercise.id == ref.exercise);
+  for (var k = 1; k < round.length; k++) {
+    final slot = round[(at + k) % round.length];
+    final planned = slot.sets.indexWhere((s) => s.isPlanned);
+    if (planned >= 0) return (exercise: slot.exercise.id, index: planned);
+  }
+  return _plannedFrom(logged, ref.exercise, ref.index + 1);
 }
 
 DayState _addExercise(DayState state, Exercise exercise, List<SetEntry> lastSession) {
@@ -452,74 +512,108 @@ DayState _addExercise(DayState state, Exercise exercise, List<SetEntry> lastSess
     return _next(state, w, (exercise: exercise.id, index: planned < 0 ? 0 : planned));
   }
   final sets = lastSession.isEmpty ? const [SetEntry()] : [for (final s in lastSession) s.asPlan];
-  return DayState._(Workout(day: w.day, note: w.note, slots: [...w.slots, Slot(exercise, sets)]), (exercise: exercise.id, index: 0));
+  return DayState._(Workout(day: w.day, note: w.note, entries: [...w.entries, Slot(exercise, sets)]), (exercise: exercise.id, index: 0));
 }
 
+/// Appends each entry of [source] with the exercises the day lacks, every set planned. A superset arrives without the exercises the day already has, which stay where they are, and one left with a single exercise arrives as a plain one.
 DayState _copyDay(DayState state, Workout source) {
   final w = state.workout;
   final added = [
-    for (final slot in source.slots)
-      if (w.indexOf(slot.exercise.id) < 0) Slot(slot.exercise, [for (final s in slot.sets) s.asPlan]),
+    for (final entry in source.entries)
+      [
+        for (final slot in entry.slots)
+          if (w.slotOf(slot.exercise.id) == null) Slot(slot.exercise, [for (final s in slot.sets) s.asPlan]),
+      ],
   ];
-  if (added.isEmpty) return state;
-  final next = Workout(day: w.day, note: w.note, slots: [...w.slots, ...added]);
+  if (added.every((group) => group.isEmpty)) return state;
+  final next = _withGroups(w, [for (final entry in w.entries) entry.slots, ...added]);
   return DayState._(next, state.focus ?? _firstPlanned(next));
 }
 
 DayState _removeSet(DayState state, SetRef ref) {
   final w = state.workout;
-  if (w.setAt(ref) == null) return state;
-  final i = w.indexOf(ref.exercise);
-  final slot = w.slots[i];
+  final slot = w.slotOf(ref.exercise);
+  if (slot == null || w.setAt(ref) == null) return state;
   if (slot.sets.length == 1) return _removeExercise(state, ref.exercise);
-  final next = _withSlot(w, i, Slot(slot.exercise, [...slot.sets]..removeAt(ref.index)));
+  final next = _withSlot(w, Slot(slot.exercise, [...slot.sets]..removeAt(ref.index)));
   final focus = state.focus;
   if (focus == ref) return DayState._(next, _plannedFrom(next, ref.exercise, ref.index));
   if (focus != null && focus.exercise == ref.exercise && focus.index > ref.index) return DayState._(next, (exercise: focus.exercise, index: focus.index - 1));
   return DayState._(next, focus);
 }
 
+/// Removing an exercise also takes it out of its superset, and a superset of two becomes the plain exercise left.
 DayState _removeExercise(DayState state, ExerciseId exercise) {
   final w = state.workout;
-  final i = w.indexOf(exercise);
-  if (i < 0) return state;
-  final next = Workout(day: w.day, note: w.note, slots: [...w.slots]..removeAt(i));
+  if (w.slotOf(exercise) == null) return state;
+  final next = _mapSlots(w, (s) => s.exercise.id == exercise ? null : s);
   return DayState._(next, state.focus?.exercise == exercise ? _firstPlanned(next) : state.focus);
 }
 
 DayState _addSet(DayState state, ExerciseId exercise) {
   final w = state.workout;
-  final i = w.indexOf(exercise);
-  if (i < 0) return state;
-  final slot = w.slots[i];
+  final slot = w.slotOf(exercise);
+  if (slot == null) return state;
   final copy = slot.sets.last.asPlan.copyWith(warmup: false);
-  return DayState._(_withSlot(w, i, Slot(slot.exercise, [...slot.sets, copy])), (exercise: exercise, index: slot.sets.length));
+  return DayState._(_withSlot(w, Slot(slot.exercise, [...slot.sets, copy])), (exercise: exercise, index: slot.sets.length));
 }
 
-Workout _move(Workout w, int from, int to) {
-  final n = w.slots.length;
-  if (from == to || from < 0 || from >= n || to < 0 || to >= n) return w;
-  final slots = [...w.slots];
-  slots.insert(to, slots.removeAt(from));
-  return Workout(day: w.day, note: w.note, slots: slots);
+/// Returns [w] itself when [layout] is not an arrangement of exactly the day's exercises, or is the one the day already has.
+Workout _arrange(Workout w, Layout layout) {
+  final slots = {for (final slot in w.slots) slot.exercise.id: slot};
+  final named = [for (final group in layout) ...group];
+  if (layout.any((group) => group.isEmpty) || named.length != slots.length || !named.every(slots.containsKey) || named.toSet().length != named.length) return w;
+  final next = _withGroups(w, [
+    for (final group in layout) [for (final id in group) slots[id]!],
+  ]);
+  return next == w ? w : next;
+}
+
+Workout _supersetWith(Workout w, ExerciseId anchor, ExerciseId added) {
+  final home = w.entryOf(anchor);
+  final moving = w.slotOf(added);
+  if (home == null || moving == null || home.slots.any((s) => s.exercise.id == added)) return w;
+  return _withGroups(w, [
+    for (final entry in w.entries)
+      [
+        for (final slot in entry.slots)
+          if (slot.exercise.id == anchor) ...[slot, moving] else if (slot.exercise.id != added) slot,
+      ],
+  ]);
 }
 
 Workout _updateExercise(Workout w, Exercise exercise) {
-  final i = w.indexOf(exercise.id);
-  if (i < 0 || w.slots[i].exercise == exercise) return w;
-  return _withSlot(w, i, Slot(exercise, w.slots[i].sets));
+  final slot = w.slotOf(exercise.id);
+  if (slot == null || slot.exercise == exercise) return w;
+  return _withSlot(w, Slot(exercise, slot.sets));
 }
 
 Workout _replaceSet(Workout w, SetRef ref, SetEntry Function(SetEntry) change) {
+  final slot = w.slotOf(ref.exercise);
   final before = w.setAt(ref);
-  if (before == null) return w;
+  if (slot == null || before == null) return w;
   final after = change(before);
   if (after == before) return w;
-  final i = w.indexOf(ref.exercise);
-  return _withSlot(w, i, Slot(w.slots[i].exercise, [...w.slots[i].sets]..[ref.index] = after));
+  return _withSlot(w, Slot(slot.exercise, [...slot.sets]..[ref.index] = after));
 }
 
-Workout _withSlot(Workout w, int index, Slot slot) => Workout(day: w.day, note: w.note, slots: [...w.slots]..[index] = slot);
+/// Puts [slot] in place of the slot of the same exercise, in the same entry.
+Workout _withSlot(Workout w, Slot slot) => _mapSlots(w, (s) => s.exercise.id == slot.exercise.id ? slot : s);
+
+/// Passes every slot through [change] and keeps each entry's grouping. A null drops the slot, and a superset left with one slot becomes that plain slot.
+Workout _mapSlots(Workout w, Slot? Function(Slot) change) => _withGroups(w, [
+  for (final entry in w.entries) [for (final slot in entry.slots) ?change(slot)],
+]);
+
+/// Builds the entries from [groups] in order: one slot is a plain exercise, two or more a superset, and an empty group is dropped.
+Workout _withGroups(Workout w, Iterable<List<Slot>> groups) => Workout(
+  day: w.day,
+  note: w.note,
+  entries: [
+    for (final group in groups)
+      if (group.length == 1) group.single else if (group.length > 1) Superset(group),
+  ],
+);
 
 SetRef? _firstPlanned(Workout w) {
   for (final slot in w.slots) {
@@ -536,6 +630,100 @@ SetRef? _plannedFrom(Workout w, ExerciseId exercise, int start) {
     if (sets[i].isPlanned) return (exercise: exercise, index: i);
   }
   return _firstPlanned(w);
+}
+
+/// One row of the workout list as the screen draws it, in one flat list: a superset is its [SupersetTop], an [ExerciseRow] per exercise and its [SupersetBottom], and a plain exercise is one [ExerciseRow].
+sealed class ListRow {
+  const ListRow();
+}
+
+/// A superset's header strip. Dragging it moves the whole superset.
+final class SupersetTop extends ListRow {
+  const SupersetTop(this.superset);
+  final Superset superset;
+
+  @override
+  bool operator ==(Object other) => other is SupersetTop && other.superset == superset;
+
+  @override
+  int get hashCode => Object.hash(SupersetTop, superset);
+}
+
+final class ExerciseRow extends ListRow {
+  const ExerciseRow(this.exercise);
+  final ExerciseId exercise;
+
+  @override
+  bool operator ==(Object other) => other is ExerciseRow && other.exercise == exercise;
+
+  @override
+  int get hashCode => Object.hash(ExerciseRow, exercise);
+}
+
+/// The end of a superset's frame. It is never dragged.
+final class SupersetBottom extends ListRow {
+  const SupersetBottom(this.superset);
+  final Superset superset;
+
+  @override
+  bool operator ==(Object other) => other is SupersetBottom && other.superset == superset;
+
+  @override
+  int get hashCode => Object.hash(SupersetBottom, superset);
+}
+
+List<ListRow> listRows(Workout workout) => [
+  for (final entry in workout.entries)
+    ...switch (entry) {
+      Slot() => [ExerciseRow(entry.exercise.id)],
+      Superset() => [SupersetTop(entry), for (final slot in entry.slots) ExerciseRow(slot.exercise.id), SupersetBottom(entry)],
+    },
+];
+
+/// The layout a drag in the [listRows] list asks for, or null when the drop changes nothing, so the screen dispatches nothing. [from] and [to] are what `onReorderItem` reports: [to] is the index the row ends at, counted after it was removed from [from].
+///
+/// An exercise row ends inside a superset when it lands between that superset's top and bottom rows, and plain otherwise, and a superset it leaves with one exercise dissolves. A top row moves its whole superset to the gap it was dropped in. While it is dragged the screen keeps the superset's other rows in the list at zero height, so [to] counts them, and a gap inside that span or right next to it is no move. A gap inside another superset's span puts it right above that superset. A bottom row never moves.
+Layout? layoutAfterDrop(Workout workout, int from, int to) {
+  final rows = listRows(workout);
+  if (from < 0 || from >= rows.length || to < 0 || to >= rows.length) return null;
+  final List<ListRow> dropped;
+  switch (rows[from]) {
+    case SupersetBottom():
+      return null;
+    case final ExerciseRow row:
+      dropped = [...rows]..removeAt(from);
+      dropped.insert(to, row);
+    case SupersetTop(:final superset):
+      final end = from + superset.slots.length + 2;
+      if (to >= from && to < end) return null;
+      final span = rows.sublist(from, end);
+      dropped = [...rows]..removeRange(from, end);
+      final gap = to < from ? to : to - (span.length - 1);
+      int? enclosing;
+      for (final (i, row) in dropped.take(gap).indexed) {
+        if (row is SupersetTop) enclosing = i;
+        if (row is SupersetBottom) enclosing = null;
+      }
+      dropped.insertAll(enclosing ?? gap, span);
+  }
+  final layout = _layoutOf(dropped);
+  return identical(_arrange(workout, layout), workout) ? null : layout;
+}
+
+Layout _layoutOf(List<ListRow> rows) {
+  final layout = <List<ExerciseId>>[];
+  List<ExerciseId>? frame;
+  for (final row in rows) {
+    switch (row) {
+      case SupersetTop():
+        layout.add(frame = []);
+      case ExerciseRow(:final exercise):
+        frame == null ? layout.add([exercise]) : frame.add(exercise);
+      case SupersetBottom():
+        frame = null;
+    }
+  }
+  return layout..removeWhere((group) => group.isEmpty);
 }
 
 int _compareFields(ExerciseKind kind, SetEntry a, SetEntry b) {

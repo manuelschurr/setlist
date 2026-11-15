@@ -23,18 +23,28 @@ Every implementer checks these off. They come from the judge's defect list, `doc
 2. **Focus after logging.** Next planned set after the logged one in the same exercise, else the first planned set in that exercise (a set skipped within the exercise), else the first planned set from the top of the workout, else null.
 3. **Stale refs.** Every `reduce` arm checks that its ref or exercise exists and returns the state unchanged when it does not. No `!` on lookups that a stale command can reach.
 4. **Defaults.** A `setting` table (`key TEXT PRIMARY KEY, value ANY`) holds `default_weight_step_g` and `default_rest_s`, used by `createExercise` when the caller gives none. Built-in fallback 2500 g and 120 s. The FitNotes import writes the FitNotes globals there from `settings.weight_increment` and `settings.rest_timer_seconds`.
-5. **FitNotes import rules.** Every set on a day before the import's today imports as done. For today and later, `is_complete` decides done or planned. `weight_increment` and `default_rest_time` that are NULL or 0 become the FitNotes globals. Set comments (`Comment.owner_type_id = 1`) become set notes, several joined with ` / `; comments whose set no longer exists are counted in the report, not imported. Supersets, routines and body weight are counted as left out.
+5. **FitNotes import rules.** Every set on a day before the import's today imports as done. For today and later, `is_complete` decides done or planned. `weight_increment` and `default_rest_time` that are NULL or 0 become the FitNotes globals. Set comments (`Comment.owner_type_id = 1`) become set notes, several joined with ` / `; comments whose set no longer exists are counted in the report, not imported. Superset groups of logged days become supersets. FitNotes gives a routine's groups an empty date, so `WorkoutGroup.date` tells the two apart, and an exercise in two groups on one day stays in the first. Routines and body weight are counted as left out.
 6. **Weight display.** `Field.weight.format` shows kg with at most two decimals and no trailing zeros (20412 g shows as `20.41`, 100000 as `100`, 102500 as `102.5`). `parse` accepts a comma or a dot. Storage and the cascade stay in exact grams.
 7. **Schema has one copy.** The migration list in `store.dart` holds the real v1 statements. `docs/schema.sql` is generated from it by a test, or the golden test compares a migrated database's `sqlite_master` with `docs/schema.sql` and fails on any difference.
 8. **Failed saves.** Keep candidate 1's `StoreWriteFailed` and the screen's retry.
 9. **Keep the screen on** while the app is in the foreground (`FLAG_KEEP_SCREEN_ON` in `MainActivity`), as FitNotes offers.
 10. **Data menu.** On the history screen: import a FitNotes backup, export a copy of the Setlist database (`Store.copyTo` then save through the file picker), and restore from such a copy (the one action with a confirmation dialog, because it replaces everything).
 
+## Supersets
+
+Added in 0.3.0, with the rules in `docs/design.md`.
+
+- **Model.** `Workout.entries` holds `Slot` (a plain exercise) and `Superset` (two or more slots) under one sealed `Entry`, and `Workout.slots` is the entries flattened, so code that walks every exercise did not change. `_withGroups` in `day.dart` is the one place where a group of one becomes a plain slot.
+- **Focus and panel.** `focusAfterLog` decides both the jump after a log and the panel's "then" line, so the two cannot disagree.
+- **Storage.** `workout_slot.joined` marks a slot that is in the same superset as the slot before it, which cannot describe a superset of one or one whose exercises are apart. Migration 2 builds the table again from exact text instead of using ADD COLUMN, because ADD COLUMN splices the column onto the line before it and its result depends on the SQLite version. `test/schema_v1.sql` is the v1 schema the migration test starts from.
+- **Drag.** Flutter's `ReorderableListView` moves one row within one flat list, so the screen draws a superset as rows of that list: a header strip, its cards and a footer. Every gap between two rows is then inside one frame or outside all of them, and `layoutAfterDrop` turns a drop into an `Arrange`. Dragging the strip folds the superset's other rows to zero height and keeps them in the list, so the drop indices still count them. They open again with the drop in `onReorderItem`, in `onReorderEnd` when the drop lands where it started (no reorder is reported then), and on a cancelled pointer, which reports neither.
+- **Known limit.** A tall, expanded card dragged a short way up from right below a frame does not land as its last exercise. Once the gap opens above the card, the footer shifts down by the card's height and the gap flips back. Folding a card to its header as soon as it is touched would cure this for every drag. It is not built.
+
 ## Module map
 
 | File | Owns |
 | --- | --- |
-| `lib/day.dart` | Value types, the `Field` and `ExerciseKind` tables, `DayState`, `Command`, `reduce`, the cascade, focus, add, copy, remove and move rules, `alignLastTime`. Imports only `dart:core`. |
+| `lib/day.dart` | Value types, the `Field` and `ExerciseKind` tables, the day's entries (`Slot` and `Superset`), `DayState`, `Command`, `reduce`, the cascade, focus, rest, add, copy, remove, arrange and superset rules, `focusAfterLog`, the drop mapping (`listRows`, `layoutAfterDrop`), `alignLastTime`. Imports only `dart:core`. |
 | `lib/store.dart` | Schema, migrations, every SQL statement, whole-day save, previous-session lookup, history paging, exercise catalog, settings, import policy and the `ImportBatch` boundary types. |
 | `lib/fitnotes.dart` | FitNotes tables and conventions, `readFitNotes` (rows to `ImportBatch`), `importFitNotes` (isolate, safety copy, `Store.importBatch`). |
 | `lib/rest_alarm.dart` | `RestAlarm.show(Rest?)`, backed by a Kotlin method channel that posts a countdown notification and an exact alarm that vibrates at zero. |
