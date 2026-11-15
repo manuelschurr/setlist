@@ -182,7 +182,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   return ListTile(
                     enabled: !_busy,
                     title: Text(dayLabel(w.day)),
-                    subtitle: Text(w.slots.isEmpty ? w.note : w.slots.map((s) => s.exercise.name).join(', '), maxLines: 2, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(w.slots.isEmpty ? w.note : namesOf(w.entries), maxLines: 2, overflow: TextOverflow.ellipsis),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [

@@ -508,5 +508,16 @@ void main() {
     expect(rest, findsOneWidget);
     expect(savedSets(bench).every((s) => s.isDone) && savedSets(row).every((s) => s.isDone), isTrue);
   });
+
+  testWidgets('a past superset day shows its names joined with a plus, and copying it keeps the superset', (tester) async {
+    store.saveDay(Workout(day: daysAgo(2), entries: [Superset([Slot(bench, sets(1, 80, 8, done: true)), Slot(row, sets(1, 60, 10, done: true))]), Slot(squat, sets(1, 100, 5, done: true))]));
+    await openToday(tester);
+    expect(find.text('Bench press + Row, Squat'), findsOneWidget);
+
+    await tester.tap(find.text('Copy'));
+    await tester.pumpAndSettle();
+    expect(find.text('Superset'), findsOneWidget);
+    expect(savedLayout(), [['Bench press', 'Row'], ['Squat']]);
+  });
 }
 

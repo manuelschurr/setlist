@@ -1028,7 +1028,7 @@ class CopyTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       title: Text(dayLabel(workout.day)),
-      subtitle: Text(workout.slots.map((s) => s.exercise.name).join(', '), maxLines: 2, overflow: TextOverflow.ellipsis),
+      subtitle: Text(namesOf(workout.entries), maxLines: 2, overflow: TextOverflow.ellipsis),
       trailing: FilledButton.tonal(onPressed: onCopy, child: const Text('Copy')),
     );
   }
