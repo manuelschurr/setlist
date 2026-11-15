@@ -1,5 +1,7 @@
 # Setlist
 
+<img src="docs/icon.png" alt="Setlist icon: a barbell with a check mark" width="96">
+
 Setlist is a strength training log for one lifter on Android, built to replace FitNotes. The whole day sits on one screen, a docked panel edits the highlighted set, an edit to set 1 carries down to the later planned sets that held the same value, logging the last set of an exercise moves on without asking, and each exercise card has a drag handle. It works offline and keeps everything in one SQLite file on the phone.
 
 `docs/design.md` says what the app does and why. `docs/architecture.md` says how the code is laid out.
@@ -39,6 +41,7 @@ On a new phone, install Setlist, open **History**, then **Data**, then **Restore
 | `scripts/fl analyze` | Runs the analyzer. |
 | `SETLIST_FITNOTES_BACKUP=<file> scripts/fl test test/fitnotes_test.dart` | Also imports a real FitNotes backup and checks one set per `training_log` row. |
 | `SETLIST_RENDER_DIR=<dir> scripts/fl test test/render_screens_test.dart` | Draws the main screens to PNGs at the test phone's size, for layout review without a device. |
+| `python3 tools/icon.py [preview-dir]` | Regenerates the launcher icon layers, `docs/icon.svg` and `docs/icon.png` from the shapes in the script, and writes launcher-shaped previews when given a folder. |
 | `SETLIST_DEVICE=<host:port> scripts/device.py <command>` | Drives a phone over adb: `install`, `launch [package]`, `ui` (lists visible labels), `tap <label>`, `shot <file>`. |
 
 Debug builds install as a separate app, `de.schurr.setlist.debug`, labelled Setlist debug, so testing never touches the installed release or its data.
