@@ -4,18 +4,29 @@ import 'package:setlist/day.dart';
 const squat = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps);
 const bench = Exercise(id: ExerciseId(2), name: 'Bench press', kind: ExerciseKind.weightReps);
 const row = Exercise(id: ExerciseId(3), name: 'Row', kind: ExerciseKind.weightReps);
+const press = Exercise(id: ExerciseId(5), name: 'Overhead press', kind: ExerciseKind.weightReps);
+const dip = Exercise(id: ExerciseId(6), name: 'Dip', kind: ExerciseKind.reps);
 final today = Day.parse('2026-11-12');
 final at = DateTime(2026, 11, 12, 18, 30);
 
 SetEntry kg(num weight, int reps, {bool done = false, bool warmup = false, String note = ''}) => SetEntry(grams: (weight * 1000).round(), reps: reps, warmup: warmup, note: note, status: done ? Done(at) : const Planned());
 
-DayState open(List<Slot> slots) => DayState.open(Workout(day: today, slots: slots));
+DayState open(List<Entry> entries) => DayState.open(Workout(day: today, entries: entries));
 
 SetRef ref(Exercise e, int index) => (exercise: e.id, index: index);
 
 List<num> weights(DayState s, Exercise e) => [for (final x in s.workout.slotOf(e.id)!.sets) x.grams / 1000];
 
 List<int> reps(DayState s, Exercise e) => [for (final x in s.workout.slotOf(e.id)!.sets) x.reps];
+
+/// The day's arrangement as exercises rather than ids, so a failure reads as names.
+List<List<Exercise>> arrangement(DayState s) => [
+  for (final entry in s.workout.entries) [for (final slot in entry.slots) slot.exercise],
+];
+
+Layout ids(List<List<Exercise>> groups) => [
+  for (final group in groups) [for (final e in group) e.id],
+];
 
 void main() {
   group('cascade', () {
@@ -164,7 +175,7 @@ void main() {
 
     test('copying a day appends only the exercises the day lacks, every set planned and without notes', () {
       final s = open([Slot(squat, [kg(100, 5)])]);
-      final past = Workout(day: Day.parse('2026-11-09'), note: 'heavy', slots: [Slot(squat, [kg(90, 5, done: true)]), Slot(bench, [kg(80, 5, done: true, note: 'pause'), kg(80, 5, done: true)])]);
+      final past = Workout(day: Day.parse('2026-11-09'), note: 'heavy', entries: [Slot(squat, [kg(90, 5, done: true)]), Slot(bench, [kg(80, 5, done: true, note: 'pause'), kg(80, 5, done: true)])]);
       final next = reduce(s, CopyDay(past));
       expect(next.workout.slots.map((x) => x.exercise), [squat, bench]);
       expect(weights(next, squat), [100]);
@@ -174,29 +185,51 @@ void main() {
     });
 
     test('copying into an empty day focuses the first copied set', () {
-      final past = Workout(day: Day.parse('2026-11-09'), slots: [Slot(bench, [kg(80, 5, done: true)])]);
+      final past = Workout(day: Day.parse('2026-11-09'), entries: [Slot(bench, [kg(80, 5, done: true)])]);
       expect(reduce(open([]), CopyDay(past)).focus, ref(bench, 0));
     });
 
     test('copying a day whose exercises are all here changes nothing', () {
       final s = open([Slot(squat, [kg(100, 5)])]);
-      final past = Workout(day: Day.parse('2026-11-09'), slots: [Slot(squat, [kg(90, 5, done: true)])]);
+      final past = Workout(day: Day.parse('2026-11-09'), entries: [Slot(squat, [kg(90, 5, done: true)])]);
       expect(identical(reduce(s, CopyDay(past)), s), isTrue);
     });
 
-    test('dragging a card moves it in one step and keeps the focus on the same set', () {
+    test('arranging puts the exercises in the order and grouping asked for and keeps the focus on the same set', () {
       var s = open([Slot(squat, [kg(100, 5)]), Slot(bench, [kg(80, 5), kg(80, 5)]), Slot(row, [kg(60, 8)])]);
       s = reduce(s, FocusSet(ref(bench, 1)));
-      s = reduce(s, const MoveExercise(1, 0));
-      expect(s.workout.slots.map((x) => x.exercise), [bench, squat, row]);
+      s = reduce(s, Arrange(ids([[bench], [squat], [row]])));
+      expect(arrangement(s), [[bench], [squat], [row]]);
       expect(s.focus, ref(bench, 1));
-      s = reduce(s, const MoveExercise(0, 2));
-      expect(s.workout.slots.map((x) => x.exercise), [squat, row, bench]);
+      s = reduce(s, Arrange(ids([[squat], [row, bench]])));
+      expect(arrangement(s), [[squat], [row, bench]]);
+      expect(s.workout.entries.last, isA<Superset>());
+      expect(s.focus, ref(bench, 1));
+      expect(weights(s, bench), [80, 80]);
     });
 
-    test('a drag that ends where it started changes nothing', () {
+    test('an arrangement the day already has returns the same state', () {
+      final s = open([Slot(squat, [kg(100, 5)]), Superset([Slot(bench, [kg(80, 5)]), Slot(row, [kg(60, 8)])])]);
+      expect(identical(reduce(s, Arrange(ids([[squat], [bench, row]]))), s), isTrue);
+    });
+
+    test('an arrangement that does not name exactly the day exercises, each once, changes nothing', () {
       final s = open([Slot(squat, [kg(100, 5)]), Slot(bench, [kg(80, 5)])]);
-      expect(identical(reduce(s, const MoveExercise(1, 1)), s), isTrue);
+      for (final layout in [
+        ids([[squat]]),
+        ids([[squat], [bench], [row]]),
+        ids([[squat], [squat]]),
+        ids([[squat, bench], []]),
+        ids([[bench], [row]]),
+        <List<ExerciseId>>[],
+      ]) {
+        expect(identical(reduce(s, Arrange(layout)), s), isTrue, reason: '$layout');
+      }
+    });
+
+    test('adding an exercise adds a plain one at the end, after a superset too', () {
+      final s = open([Superset([Slot(bench, [kg(80, 5)]), Slot(row, [kg(60, 8)])])]);
+      expect(arrangement(reduce(s, const AddExercise(squat, lastSession: []))), [[bench, row], [squat]]);
     });
 
     test('adding a set copies the last set as a planned working set without its note and focuses it', () {
@@ -280,13 +313,149 @@ void main() {
       RemoveSet(ref(bench, 0)),
       RemoveSet(ref(squat, 2)),
       RemoveExercise(bench.id),
-      const MoveExercise(0, 1),
-      const MoveExercise(-1, 0),
+      Arrange(ids([[bench]])),
+      const Arrange([]),
       const UpdateExercise(bench),
     ];
     for (final command in stale) {
       expect(identical(reduce(s, command), s), isTrue, reason: '${command.runtimeType} on a missing target');
     }
+  });
+
+  group('supersets in the day', () {
+    test('copying a day brings its supersets, without the exercises the day already has, and one left alone arrives plain', () {
+      final s = open([Slot(bench, [kg(85, 5)]), Slot(dip, [const SetEntry(reps: 10)])]);
+      final past = Workout(day: Day.parse('2026-11-09'), entries: [
+        Superset([Slot(squat, [kg(100, 5, done: true)]), Slot(bench, [kg(80, 5, done: true)])]),
+        Superset([Slot(row, [kg(60, 8, done: true)]), Slot(press, [kg(40, 8, done: true)]), Slot(dip, [const SetEntry(reps: 12, status: Done())])]),
+      ]);
+      final next = reduce(s, CopyDay(past));
+      expect(arrangement(next), [[bench], [dip], [squat], [row, press]]);
+      expect(next.workout.entries.last, Superset([Slot(row, [kg(60, 8)]), Slot(press, [kg(40, 8)])]));
+      expect(weights(next, bench), [85]);
+      expect(reps(next, dip), [10]);
+    });
+
+    test('copying into an empty day brings a superset whole', () {
+      final past = Workout(day: Day.parse('2026-11-09'), entries: [Superset([Slot(bench, [kg(80, 5, done: true)]), Slot(row, [kg(60, 8, done: true)])])]);
+      expect(arrangement(reduce(open([]), CopyDay(past))), [[bench, row]]);
+    });
+
+    test('removing an exercise takes it out of its superset, and a pair becomes the plain exercise left', () {
+      final pair = open([Superset([Slot(bench, [kg(80, 5)]), Slot(row, [kg(60, 8)])]), Slot(squat, [kg(100, 5)])]);
+      final next = reduce(pair, RemoveExercise(bench.id));
+      expect(arrangement(next), [[row], [squat]]);
+      expect(next.workout.entries.first, isA<Slot>());
+      final three = open([Superset([Slot(bench, [kg(80, 5)]), Slot(row, [kg(60, 8)]), Slot(press, [kg(40, 8)])])]);
+      expect(arrangement(reduce(three, RemoveExercise(row.id))), [[bench, press]]);
+    });
+
+    test('removing the last set of an exercise in a pair leaves the other as a plain exercise', () {
+      final s = open([Slot(squat, [kg(100, 5)]), Superset([Slot(bench, [kg(80, 5)]), Slot(row, [kg(60, 8), kg(60, 8)])])]);
+      final next = reduce(s, RemoveSet(ref(bench, 0)));
+      expect(arrangement(next), [[squat], [row]]);
+      expect(next.workout.entries.last, Slot(row, [kg(60, 8), kg(60, 8)]));
+      expect(arrangement(reduce(s, RemoveSet(ref(row, 1)))), [[squat], [bench, row]]);
+    });
+
+    test('set edits, logs, added sets and exercise edits inside a superset keep it together', () {
+      final s = open([Slot(squat, [kg(100, 5)]), Superset([Slot(bench, [kg(80, 5), kg(80, 5)]), Slot(row, [kg(60, 8)])])]);
+      final cascaded = reduce(s, SetField(ref(bench, 0), Field.weight, 82500));
+      expect(weights(cascaded, bench), [82.5, 82.5]);
+      const renamed = Exercise(id: ExerciseId(3), name: 'Barbell row', kind: ExerciseKind.weightReps);
+      for (final next in [
+        cascaded,
+        reduce(s, SetWarmup(ref(row, 0), warmup: true)),
+        reduce(s, SetSetNote(ref(row, 0), 'strap')),
+        reduce(s, LogSet(ref(row, 0), at: at)),
+        reduce(reduce(s, LogSet(ref(row, 0), at: at)), UnlogSet(ref(row, 0))),
+        reduce(s, AddSet(row.id)),
+        reduce(s, const UpdateExercise(renamed)),
+      ]) {
+        expect(next.workout.layout, ids([[squat], [bench, row]]));
+        expect(next.workout.entries.last, isA<Superset>());
+      }
+    });
+  });
+
+  group('dragging in the list', () {
+    Slot one(Exercise e) => Slot(e, [kg(50, 5)]);
+    Workout day(List<Entry> entries) => Workout(day: today, entries: entries);
+
+    /// The arrangement after the drop, applied the way the screen does, or null when the drop asks for nothing.
+    List<List<Exercise>>? drop(Workout w, int from, int to) {
+      final layout = layoutAfterDrop(w, from, to);
+      return layout == null ? null : arrangement(reduce(DayState.open(w), Arrange(layout)));
+    }
+
+    // Rows: 0 Squat, 1 top, 2 Bench, 3 Row, 4 bottom, 5 Press.
+    final framed = day([one(squat), Superset([one(bench), one(row)]), one(press)]);
+
+    test('a superset is a top row, its exercise rows and a bottom row, and a plain exercise is one row', () {
+      final pair = framed.entries[1] as Superset;
+      expect(listRows(framed), [ExerciseRow(squat.id), SupersetTop(pair), ExerciseRow(bench.id), ExerciseRow(row.id), SupersetBottom(pair), ExerciseRow(press.id)]);
+    });
+
+    test('without supersets a drop moves one card, and a drop where it started asks for nothing', () {
+      final plain = day([one(squat), one(bench), one(row)]);
+      expect(drop(plain, 0, 2), [[bench], [row], [squat]]);
+      expect(drop(plain, 2, 0), [[row], [squat], [bench]]);
+      expect(drop(plain, 1, 1), isNull);
+    });
+
+    test('an exercise dropped between a top and a bottom row joins that superset at that spot', () {
+      expect(drop(framed, 5, 3), [[squat], [bench, press, row]]);
+      expect(drop(framed, 5, 2), [[squat], [press, bench, row]], reason: 'right below the top row is the first of the round');
+      expect(drop(framed, 5, 4), [[squat], [bench, row, press]], reason: 'right above the bottom row is the last of the round');
+      expect(drop(framed, 0, 3), [[bench, row, squat], [press]]);
+    });
+
+    test('an exercise dropped outside every frame is plain, right at either edge too', () {
+      expect(drop(framed, 5, 1), [[squat], [press], [bench, row]], reason: 'right above the top row');
+      expect(drop(framed, 0, 4), [[bench, row], [squat], [press]], reason: 'right below the bottom row');
+    });
+
+    test('dragging an exercise out of a pair dissolves it, and within a superset changes the round order', () {
+      expect(drop(framed, 2, 0), [[bench], [squat], [row], [press]]);
+      expect(drop(framed, 3, 5), [[squat], [bench], [press], [row]]);
+      expect(drop(framed, 2, 3), [[squat], [row, bench], [press]]);
+      expect(drop(framed, 2, 2), isNull);
+    });
+
+    test('an exercise dragged from one superset into another leaves a pair behind as a plain exercise', () {
+      // Rows: 0 Press, 1 top, 2 Squat, 3 Dip, 4 bottom, 5 top, 6 Bench, 7 Row, 8 bottom.
+      final two = day([one(press), Superset([one(squat), one(dip)]), Superset([one(bench), one(row)])]);
+      expect(drop(two, 3, 6), [[press], [squat], [bench, dip, row]]);
+    });
+
+    test('a top row moves its whole superset to the gap it was dropped in', () {
+      expect(drop(framed, 1, 0), [[bench, row], [squat], [press]]);
+      expect(drop(framed, 1, 5), [[squat], [press], [bench, row]]);
+    });
+
+    test('a top row dropped inside its own span or right next to it asks for nothing', () {
+      for (final to in [1, 2, 3, 4]) {
+        expect(drop(framed, 1, to), isNull, reason: 'gap $to');
+      }
+    });
+
+    test('a top row dropped inside another superset lands right above it', () {
+      // Rows: 0 Press, 1 top, 2 Squat, 3 Dip, 4 bottom, 5 top, 6 Bench, 7 Row, 8 bottom.
+      final two = day([one(press), Superset([one(squat), one(dip)]), Superset([one(bench), one(row)])]);
+      for (final to in [1, 2, 3, 4]) {
+        expect(drop(two, 5, to), [[press], [bench, row], [squat, dip]], reason: 'gap $to');
+      }
+      expect(drop(two, 1, 6), isNull, reason: 'right above the superset below is where it already is');
+      expect(drop(two, 1, 8), [[press], [bench, row], [squat, dip]]);
+    });
+
+    test('a bottom row never moves, and indexes outside the list ask for nothing', () {
+      expect(drop(framed, 4, 0), isNull);
+      expect(drop(framed, -1, 0), isNull);
+      expect(drop(framed, 6, 0), isNull);
+      expect(drop(framed, 0, 6), isNull);
+      expect(drop(framed, 0, -1), isNull);
+    });
   });
 
   group('last time', () {
@@ -428,7 +597,7 @@ void main() {
   });
 
   test('summary counts done sets, working-set volume and the time from first to last log', () {
-    final w = Workout(day: today, slots: [
+    final w = Workout(day: today, entries: [
       Slot(squat, [SetEntry(grams: 60000, reps: 5, warmup: true, status: Done(at)), SetEntry(grams: 100000, reps: 5, status: Done(at.add(const Duration(minutes: 3)))), kg(100, 5)]),
       Slot(bench, [SetEntry(grams: 80000, reps: 5, status: Done(at.add(const Duration(minutes: 20))))]),
     ]);
@@ -452,8 +621,11 @@ void main() {
     expect(Day.parse('2026-11-09').isBefore(today), isTrue);
   });
 
-  test('a day holds each exercise once and a slot is never empty', () {
-    expect(() => Workout(day: today, slots: [Slot(squat, [kg(100, 5)]), Slot(squat, [kg(90, 5)])]), throwsArgumentError);
+  test('a day holds each exercise once, a slot is never empty and a superset holds at least two exercises', () {
+    expect(() => Workout(day: today, entries: [Slot(squat, [kg(100, 5)]), Slot(squat, [kg(90, 5)])]), throwsArgumentError);
+    expect(() => Workout(day: today, entries: [Slot(squat, [kg(100, 5)]), Superset([Slot(bench, [kg(80, 5)]), Slot(squat, [kg(90, 5)])])]), throwsArgumentError);
     expect(() => Slot(squat, []), throwsArgumentError);
+    expect(() => Superset([Slot(squat, [kg(100, 5)])]), throwsArgumentError);
+    expect(() => Superset([]), throwsArgumentError);
   });
 }

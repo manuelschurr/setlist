@@ -62,7 +62,7 @@ void main() {
     final bench = store.createExercise(name: 'Incline Dumbbell Bench Press', kind: ExerciseKind.weightReps, category: 'Chest');
     final raise = store.createExercise(name: 'Lateral Dumbbell Raise', kind: ExerciseKind.weightReps, category: 'Shoulders');
     final plank = store.createExercise(name: 'Plank', kind: ExerciseKind.time, category: 'Core');
-    store.saveDay(Workout(day: daysAgo(3), slots: [
+    store.saveDay(Workout(day: daysAgo(3), entries: [
       Slot(squat, [kg(20, 8, warmup: true), kg(34, 5), kg(34, 5), kg(34, 5)]),
       Slot(bench, [kg(13, 10), kg(13, 10), kg(13, 10)]),
       Slot(raise, [kg(8, 15), kg(8, 15), kg(8, 15)]),

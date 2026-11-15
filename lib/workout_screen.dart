@@ -161,7 +161,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
     RemoveSet() => 'Set removed',
     RemoveExercise() => 'Exercise removed',
     CopyDay() => 'Workout copied',
-    FocusSet() || SetField() || SetWarmup() || SetSetNote() || UnlogSet() || AddSet() || AddExercise() || MoveExercise() || SetNote() || UpdateExercise() => null,
+    FocusSet() || SetField() || SetWarmup() || SetSetNote() || UnlogSet() || AddSet() || AddExercise() || Arrange() || SetNote() || UpdateExercise() => null,
   };
 
   Future<T?> _push<T>(Widget screen) async {
@@ -274,6 +274,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
   @override
   Widget build(BuildContext context) {
     final workout = _state.workout;
+    final rows = listRows(workout);
     final note = workout.note.isEmpty ? null : ListTile(leading: const Icon(Icons.notes), title: Text(workout.note), onTap: _editNote);
     return Scaffold(
       appBar: AppBar(
@@ -326,12 +327,21 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
                     // Every card stays built, so a card the focus moves to can be scrolled to. A day has about ten exercises at most.
                     scrollCacheExtent: const ScrollCacheExtent.pixels(20000),
                     padding: const EdgeInsets.only(top: 4, bottom: 16),
-                    itemCount: workout.slots.length,
-                    onReorderItem: (from, to) => _dispatch(MoveExercise(from, to)),
+                    itemCount: rows.length,
+                    onReorderItem: (from, to) {
+                      final layout = layoutAfterDrop(workout, from, to);
+                      if (layout != null) _dispatch(Arrange(layout));
+                    },
                     header: note,
                     itemBuilder: (context, i) {
-                      final slot = workout.slots[i];
-                      final id = slot.exercise.id;
+                      final ExerciseId id;
+                      switch (rows[i]) {
+                        case ExerciseRow(:final exercise):
+                          id = exercise;
+                        case SupersetTop(:final superset) || SupersetBottom(:final superset):
+                          return SizedBox.shrink(key: ValueKey((rows[i].runtimeType, superset.slots.first.exercise.id)));
+                      }
+                      final slot = workout.slotOf(id)!;
                       return _SlotCard(
                         key: _cardKeys.putIfAbsent(id, GlobalKey.new),
                         index: i,

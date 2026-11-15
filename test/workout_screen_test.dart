@@ -60,7 +60,7 @@ void main() {
   List<SetEntry> savedSets(Exercise e) => store.loadDay(today).slotOf(e.id)!.sets;
 
   testWidgets('one plus tap on set 1 turns a copied 3 x 5 at 100 kg into 3 x 5 at 102.5 kg', (tester) async {
-    store.saveDay(Workout(day: daysAgo(3), slots: [Slot(squat, sets(3, 100, 5, done: true))]));
+    store.saveDay(Workout(day: daysAgo(3), entries: [Slot(squat, sets(3, 100, 5, done: true))]));
     await openToday(tester);
     await tester.tap(find.text('Copy'));
     await tester.pumpAndSettle();
@@ -74,7 +74,7 @@ void main() {
   });
 
   testWidgets('a typed value commits once, on OK', (tester) async {
-    store.saveDay(Workout(day: today, slots: [Slot(squat, [kg(100, 5), kg(100, 5), kg(1, 5)])]));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, [kg(100, 5), kg(100, 5), kg(1, 5)])]));
     await openToday(tester);
     await tester.tap(inPanel(find.text('100 kg')));
     await tester.pumpAndSettle();
@@ -89,7 +89,7 @@ void main() {
   });
 
   testWidgets('logging the last set of an exercise moves the panel to the next exercise with no dialog', (tester) async {
-    store.saveDay(Workout(day: today, slots: [Slot(squat, [kg(100, 5, done: true), kg(100, 5)]), Slot(bench, sets(2, 80, 8))]));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, [kg(100, 5, done: true), kg(100, 5)]), Slot(bench, sets(2, 80, 8))]));
     await openToday(tester);
     expect(inPanel(find.text('Squat')), findsOneWidget);
     expect(inPanel(find.text('Set 2 of 2')), findsOneWidget);
@@ -105,7 +105,7 @@ void main() {
   });
 
   testWidgets('a finished card collapses to its summary and a tap on its header opens it again', (tester) async {
-    store.saveDay(Workout(day: today, slots: [Slot(squat, [kg(100, 5, done: true), kg(100, 5)]), Slot(bench, sets(2, 80, 8))]));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, [kg(100, 5, done: true), kg(100, 5)]), Slot(bench, sets(2, 80, 8))]));
     await openToday(tester);
     expect(find.text('100 kg × 5'), findsNWidgets(2));
 
@@ -121,7 +121,7 @@ void main() {
   });
 
   testWidgets('Undo after logging restores the set and ends the rest', (tester) async {
-    store.saveDay(Workout(day: today, slots: [Slot(squat, sets(2, 100, 5))]));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(2, 100, 5))]));
     await openToday(tester);
     await tester.tap(inPanel(find.text('Log set')));
     await tester.pumpAndSettle();
@@ -142,7 +142,7 @@ void main() {
   /// Opens yesterday over the home and logs its first set there, which offers Undo.
   Future<Day> logOnYesterday(WidgetTester tester) async {
     final past = daysAgo(1);
-    store.saveDay(Workout(day: past, slots: [Slot(squat, sets(2, 100, 5))]));
+    store.saveDay(Workout(day: past, entries: [Slot(squat, sets(2, 100, 5))]));
     await openToday(tester);
     final home = tester.widget<WorkoutScreen>(find.byType(WorkoutScreen)).home;
     tester.state<NavigatorState>(find.byType(Navigator)).push(MaterialPageRoute<void>(builder: (_) => WorkoutScreen(store: store, home: home, day: past)));
@@ -177,7 +177,7 @@ void main() {
 
   testWidgets('dragging a card by its handle moves it in one gesture', (tester) async {
     final row = store.createExercise(name: 'Row', kind: ExerciseKind.weightReps);
-    store.saveDay(Workout(day: today, slots: [Slot(squat, sets(3, 100, 5)), Slot(bench, sets(3, 80, 8)), Slot(row, sets(3, 60, 10))]));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(3, 100, 5)), Slot(bench, sets(3, 80, 8)), Slot(row, sets(3, 60, 10))]));
     await openToday(tester);
     final names = ['Squat', 'Bench press', 'Row'];
     expect(cardOrder(tester, names), names);
@@ -199,7 +199,7 @@ void main() {
   testWidgets('an empty day offers the five most recent workouts, and Copy fills the day', (tester) async {
     for (var n = 1; n <= 6; n++) {
       final e = store.createExercise(name: 'Lift $n', kind: ExerciseKind.weightReps);
-      store.saveDay(Workout(day: daysAgo(n), slots: [Slot(e, sets(2, 50 + n, 5, done: true))]));
+      store.saveDay(Workout(day: daysAgo(n), entries: [Slot(e, sets(2, 50 + n, 5, done: true))]));
     }
     await openToday(tester);
     expect(find.text('Copy'), findsNWidgets(5));
@@ -215,7 +215,7 @@ void main() {
   });
 
   testWidgets('tapping a row moves the panel to that set', (tester) async {
-    store.saveDay(Workout(day: today, slots: [Slot(squat, sets(3, 100, 5)), Slot(bench, [kg(80, 8), kg(85, 6)])]));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(3, 100, 5)), Slot(bench, [kg(80, 8), kg(85, 6)])]));
     await openToday(tester);
     expect(inPanel(find.text('Squat')), findsOneWidget);
 
@@ -229,7 +229,7 @@ void main() {
 
   testWidgets('when the focus moves to an exercise off the screen, its card scrolls into view', (tester) async {
     final row = store.createExercise(name: 'Row', kind: ExerciseKind.weightReps);
-    store.saveDay(Workout(day: today, slots: [Slot(squat, sets(5, 100, 5)), Slot(bench, sets(5, 80, 8)), Slot(row, sets(1, 60, 10))]));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(5, 100, 5)), Slot(bench, sets(5, 80, 8)), Slot(row, sets(1, 60, 10))]));
     await openToday(tester);
     await tester.ensureVisible(find.text('60 kg × 10', skipOffstage: false));
     await tester.pumpAndSettle();
@@ -247,7 +247,7 @@ void main() {
 
   testWidgets('the picker adds an exercise with planned sets from its last session, and creates a new one', (tester) async {
     final deadlift = store.createExercise(name: 'Deadlift', kind: ExerciseKind.weightReps);
-    store.saveDay(Workout(day: daysAgo(2), slots: [Slot(deadlift, [kg(140, 5, done: true), kg(140, 5, done: true), kg(150, 3, done: true)])]));
+    store.saveDay(Workout(day: daysAgo(2), entries: [Slot(deadlift, [kg(140, 5, done: true), kg(140, 5, done: true), kg(150, 3, done: true)])]));
     await openToday(tester);
 
     await tester.tap(find.text('Add exercise'));
@@ -292,8 +292,8 @@ void main() {
   });
 
   testWidgets('history returns to the home screen for today, and its Copy fills today there', (tester) async {
-    store.saveDay(Workout(day: daysAgo(2), slots: [Slot(squat, sets(3, 100, 5, done: true))]));
-    store.saveDay(Workout(day: today, slots: [Slot(bench, sets(2, 80, 8))]));
+    store.saveDay(Workout(day: daysAgo(2), entries: [Slot(squat, sets(3, 100, 5, done: true))]));
+    store.saveDay(Workout(day: today, entries: [Slot(bench, sets(2, 80, 8))]));
     await openToday(tester);
 
     await tester.tap(find.byTooltip('History'));
@@ -313,10 +313,10 @@ void main() {
   });
 
   testWidgets('exercise history shows each session with its estimated max and marks a new best', (tester) async {
-    store.saveDay(Workout(day: daysAgo(3), slots: [Slot(squat, [kg(100, 5, done: true)])]));
-    store.saveDay(Workout(day: daysAgo(2), slots: [Slot(squat, [kg(100, 3, done: true)])]));
-    store.saveDay(Workout(day: daysAgo(1), slots: [Slot(squat, [kg(105, 5, done: true)])]));
-    store.saveDay(Workout(day: today, slots: [Slot(squat, sets(1, 105, 5))]));
+    store.saveDay(Workout(day: daysAgo(3), entries: [Slot(squat, [kg(100, 5, done: true)])]));
+    store.saveDay(Workout(day: daysAgo(2), entries: [Slot(squat, [kg(100, 3, done: true)])]));
+    store.saveDay(Workout(day: daysAgo(1), entries: [Slot(squat, [kg(105, 5, done: true)])]));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 105, 5))]));
     await openToday(tester);
 
     await tester.tap(find.byTooltip('More for Squat'));

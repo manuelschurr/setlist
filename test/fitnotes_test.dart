@@ -177,7 +177,7 @@ void main() {
       final store = Store.open(dbPath);
       addTearDown(store.close);
       final squat = store.loadDay(past).slots[1].exercise;
-      final edited = Workout(day: past, slots: [Slot(squat, [done(110000, 3)])]);
+      final edited = Workout(day: past, entries: [Slot(squat, [done(110000, 3)])]);
       store.saveDay(edited);
 
       final again = await importFitNotes(backupPath: backupPath, dbPath: dbPath);

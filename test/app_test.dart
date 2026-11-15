@@ -25,7 +25,7 @@ void main() {
     final today = Day.of(DateTime.now());
     final source = Store.open('${dir.path}/source.sqlite');
     final squat = source.createExercise(name: 'Squat', kind: ExerciseKind.weightReps);
-    source.saveDay(Workout(day: today, slots: [Slot(squat, const [SetEntry(grams: 100000, reps: 5)])]));
+    source.saveDay(Workout(day: today, entries: [Slot(squat, const [SetEntry(grams: 100000, reps: 5)])]));
     source.copyTo('${dir.path}/backup.sqlite');
     source.close();
 
@@ -55,7 +55,7 @@ void main() {
     final evening = Day.parse('2026-03-10');
     final seed = Store.open('${dir.path}/setlist.sqlite');
     final squat = seed.createExercise(name: 'Squat', kind: ExerciseKind.weightReps);
-    seed.saveDay(Workout(day: evening, slots: [Slot(squat, [SetEntry(grams: 100000, reps: 5, status: Done(DateTime(2026, 3, 10, 23, 30))), const SetEntry(grams: 100000, reps: 5)])]));
+    seed.saveDay(Workout(day: evening, entries: [Slot(squat, [SetEntry(grams: 100000, reps: 5, status: Done(DateTime(2026, 3, 10, 23, 30))), const SetEntry(grams: 100000, reps: 5)])]));
     seed.close();
     var now = DateTime(2026, 3, 10, 23, 40);
     Future<void> resumeAt(DateTime time) async {
@@ -87,7 +87,7 @@ void main() {
     final today = Day.of(DateTime.now());
     final seed = Store.open(path);
     final squat = seed.createExercise(name: 'Squat', kind: ExerciseKind.weightReps);
-    seed.saveDay(Workout(day: today, slots: [Slot(squat, const [SetEntry(grams: 100000, reps: 5)])]));
+    seed.saveDay(Workout(day: today, entries: [Slot(squat, const [SetEntry(grams: 100000, reps: 5)])]));
     nextMillisecond();
     await DriveBackup(dbPath: path, store: () => seed).linkNewFile();
     seed.close();

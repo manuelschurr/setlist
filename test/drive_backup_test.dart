@@ -77,7 +77,7 @@ void main() {
   late FakeProvider provider;
   late Exercise squat;
 
-  void logSets(int count) => store.saveDay(Workout(day: today, slots: [Slot(squat, [for (var i = 0; i < count; i++) SetEntry(grams: 100000, reps: 5, status: Done(DateTime.now()))])]));
+  void logSets(int count) => store.saveDay(Workout(day: today, entries: [Slot(squat, [for (var i = 0; i < count; i++) SetEntry(grams: 100000, reps: 5, status: Done(DateTime.now()))])]));
   DriveBackup open() => DriveBackup(dbPath: path, store: () => store);
 
   setUp(() {

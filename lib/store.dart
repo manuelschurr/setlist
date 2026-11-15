@@ -277,7 +277,7 @@ List<Workout> _assemble(ResultSet rows) {
     if (row['done'] != null) sets.add(_set(row));
   }
   return [
-    for (final MapEntry(key: day, value: (:note, :slots)) in days.entries) Workout(day: Day.parse(day), note: note, slots: [for (final (exercise, sets) in slots.values) Slot(exercise, sets)]),
+    for (final MapEntry(key: day, value: (:note, :slots)) in days.entries) Workout(day: Day.parse(day), note: note, entries: [for (final (exercise, sets) in slots.values) Slot(exercise, sets)]),
   ];
 }
 

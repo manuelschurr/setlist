@@ -41,7 +41,7 @@ void main() {
 
   group('days', () {
     test('saving the same day twice leaves the same rows', () {
-      final w = Workout(day: d1, note: 'legs', slots: [Slot(squat, [done(100000, 5), const SetEntry(grams: 100000, reps: 5)])]);
+      final w = Workout(day: d1, note: 'legs', entries: [Slot(squat, [done(100000, 5), const SetEntry(grams: 100000, reps: 5)])]);
       store.saveDay(w);
       final once = dump(path);
       store.saveDay(w);
@@ -53,7 +53,7 @@ void main() {
     test('a day loads back with its order, notes, warm-ups, log times and imported sets', () {
       final plank = store.createExercise(name: 'Plank', kind: ExerciseKind.time);
       final run = store.createExercise(name: 'Run', kind: ExerciseKind.distanceTime);
-      final w = Workout(day: d3, note: 'felt strong', slots: [
+      final w = Workout(day: d3, note: 'felt strong', entries: [
         Slot(plank, [SetEntry(seconds: 60, status: Done(DateTime(2026, 11, 12, 18, 30, 15, 250))), const SetEntry(seconds: 60, status: Done())]),
         Slot(squat, [SetEntry(grams: 60000, reps: 5, warmup: true, note: 'easy', status: Done(DateTime(2026, 11, 12, 18, 40))), const SetEntry(grams: 20412, reps: 5, note: 'belt'), const SetEntry(grams: -5000, reps: 8)]),
         Slot(run, [const SetEntry(metres: 5200, seconds: 1500)]),
@@ -67,7 +67,7 @@ void main() {
     });
 
     test('a day with no exercises and no note is deleted, and a note alone keeps a day', () {
-      store.saveDay(Workout(day: d1, slots: [Slot(squat, [done(100000, 5)])]));
+      store.saveDay(Workout(day: d1, entries: [Slot(squat, [done(100000, 5)])]));
       store.saveDay(Workout(day: d1));
       store.saveDay(Workout(day: d2, note: 'rest day'));
       expect(store.recentWorkouts(), [Workout(day: d2, note: 'rest day')]);
@@ -75,18 +75,18 @@ void main() {
     });
 
     test('a failed save throws StoreWriteFailed and keeps the rows from before', () {
-      final w = Workout(day: d1, slots: [Slot(squat, [done(100000, 5)])]);
+      final w = Workout(day: d1, entries: [Slot(squat, [done(100000, 5)])]);
       store.saveDay(w);
       const ghost = Exercise(id: ExerciseId(999), name: 'Ghost', kind: ExerciseKind.reps);
-      expect(() => store.saveDay(Workout(day: d1, slots: [Slot(ghost, [const SetEntry(reps: 5)])])), throwsA(isA<StoreWriteFailed>()));
-      expect(() => store.saveDay(Workout(day: d1, slots: [Slot(squat, [const SetEntry(reps: -1)])])), throwsA(isA<StoreWriteFailed>()));
+      expect(() => store.saveDay(Workout(day: d1, entries: [Slot(ghost, [const SetEntry(reps: 5)])])), throwsA(isA<StoreWriteFailed>()));
+      expect(() => store.saveDay(Workout(day: d1, entries: [Slot(squat, [const SetEntry(reps: -1)])])), throwsA(isA<StoreWriteFailed>()));
       expect(store.loadDay(d1), w);
-      store.saveDay(Workout(day: d1, slots: [Slot(squat, [done(105000, 5)])]));
+      store.saveDay(Workout(day: d1, entries: [Slot(squat, [done(105000, 5)])]));
       expect(store.loadDay(d1).slots.single.sets.single.grams, 105000);
     });
 
     test('a saved day shows its exercise as it is now', () {
-      store.saveDay(Workout(day: d1, slots: [Slot(squat, [done(100000, 5)])]));
+      store.saveDay(Workout(day: d1, entries: [Slot(squat, [done(100000, 5)])]));
       final renamed = Exercise(id: squat.id, name: 'Back squat', kind: ExerciseKind.weightReps, category: 'Legs', weightStepGrams: 1000, rest: const Duration(minutes: 3));
       store.updateExercise(renamed);
       expect(store.loadDay(d1).slots.single.exercise, renamed);
@@ -95,9 +95,9 @@ void main() {
 
   group('history', () {
     test('last session skips days with only planned sets and days on or after the one asked about', () {
-      store.saveDay(Workout(day: d1, slots: [Slot(squat, [done(100000, 5, note: 'grindy'), done(100000, 4), const SetEntry(grams: 100000, reps: 5)])]));
-      store.saveDay(Workout(day: d2, slots: [Slot(squat, [const SetEntry(grams: 102500, reps: 5)])]));
-      store.saveDay(Workout(day: d3, slots: [Slot(squat, [done(105000, 5)])]));
+      store.saveDay(Workout(day: d1, entries: [Slot(squat, [done(100000, 5, note: 'grindy'), done(100000, 4), const SetEntry(grams: 100000, reps: 5)])]));
+      store.saveDay(Workout(day: d2, entries: [Slot(squat, [const SetEntry(grams: 102500, reps: 5)])]));
+      store.saveDay(Workout(day: d3, entries: [Slot(squat, [done(105000, 5)])]));
       expect(store.lastSession(squat.id, before: d3), [done(100000, 5, note: 'grindy'), done(100000, 4)]);
       expect(store.lastSession(squat.id, before: Day.parse('2026-11-13')), [done(105000, 5)]);
       expect(store.lastSession(squat.id, before: d1), isEmpty);
@@ -105,9 +105,9 @@ void main() {
 
     test('exercise history lists the days with done sets newest first, each with only its done sets', () {
       final bench = store.createExercise(name: 'Bench', kind: ExerciseKind.weightReps);
-      store.saveDay(Workout(day: d1, slots: [Slot(bench, [done(80000, 5)]), Slot(squat, [done(100000, 5, note: 'grindy'), const SetEntry(grams: 100000, reps: 5), done(100000, 4)])]));
-      store.saveDay(Workout(day: d2, slots: [Slot(squat, [const SetEntry(grams: 102500, reps: 5)])]));
-      store.saveDay(Workout(day: d3, slots: [Slot(squat, [done(105000, 5), done(105000, 3)])]));
+      store.saveDay(Workout(day: d1, entries: [Slot(bench, [done(80000, 5)]), Slot(squat, [done(100000, 5, note: 'grindy'), const SetEntry(grams: 100000, reps: 5), done(100000, 4)])]));
+      store.saveDay(Workout(day: d2, entries: [Slot(squat, [const SetEntry(grams: 102500, reps: 5)])]));
+      store.saveDay(Workout(day: d3, entries: [Slot(squat, [done(105000, 5), done(105000, 3)])]));
       final history = store.exerciseHistory(squat.id);
       expect([for (final s in history) s.day], [d3, d1]);
       expect(history.first.sets, [done(105000, 5), done(105000, 3)]);
@@ -119,14 +119,14 @@ void main() {
     test('recent workouts page newest first', () {
       final days = [for (final d in ['01', '02', '03', '04', '05']) Day.parse('2026-10-$d')];
       for (final day in days) {
-        store.saveDay(Workout(day: day, slots: [Slot(squat, [done(100000, 5)])]));
+        store.saveDay(Workout(day: day, entries: [Slot(squat, [done(100000, 5)])]));
       }
       List<Day> page(Day? before) => [for (final w in store.recentWorkouts(before: before, limit: 2)) w.day];
       expect(page(null), [days[4], days[3]]);
       expect(page(days[3]), [days[2], days[1]]);
       expect(page(days[1]), [days[0]]);
       expect(page(days[0]), isEmpty);
-      expect(store.recentWorkouts(before: days[3], limit: 1).single, Workout(day: days[2], slots: [Slot(squat, [done(100000, 5)])]));
+      expect(store.recentWorkouts(before: days[3], limit: 1).single, Workout(day: days[2], entries: [Slot(squat, [done(100000, 5)])]));
     });
 
     test('the exercise list puts the most recently done first, then the never-done ones by name', () {
@@ -134,9 +134,9 @@ void main() {
       final row = store.createExercise(name: 'Row', kind: ExerciseKind.weightReps);
       final abWheel = store.createExercise(name: 'ab wheel', kind: ExerciseKind.reps);
       final curl = store.createExercise(name: 'Curl', kind: ExerciseKind.weightReps);
-      store.saveDay(Workout(day: d1, slots: [Slot(bench, [done(80000, 5)]), Slot(row, [done(60000, 8)])]));
-      store.saveDay(Workout(day: d2, slots: [Slot(squat, [done(100000, 5)])]));
-      store.saveDay(Workout(day: d3, slots: [Slot(row, [const SetEntry(grams: 60000, reps: 8)]), Slot(curl, [const SetEntry(grams: 12000, reps: 10)])]));
+      store.saveDay(Workout(day: d1, entries: [Slot(bench, [done(80000, 5)]), Slot(row, [done(60000, 8)])]));
+      store.saveDay(Workout(day: d2, entries: [Slot(squat, [done(100000, 5)])]));
+      store.saveDay(Workout(day: d3, entries: [Slot(row, [const SetEntry(grams: 60000, reps: 8)]), Slot(curl, [const SetEntry(grams: 12000, reps: 10)])]));
       final names = [for (final e in store.exercises()) e.name];
       expect(names.take(1), [squat.name]);
       expect(names.skip(1).take(2).toSet(), {bench.name, row.name});
@@ -205,7 +205,7 @@ void main() {
 
     test('never overwrites or resurrects a day the lifter saved in Setlist', () {
       store.importBatch(batch);
-      final edited = Workout(day: d1, slots: [Slot(squat, [done(110000, 5)])]);
+      final edited = Workout(day: d1, entries: [Slot(squat, [done(110000, 5)])]);
       store.saveDay(edited);
       store.saveDay(Workout(day: d2));
       final report = store.importBatch(batch);
@@ -291,7 +291,7 @@ void main() {
     });
 
     test('a fresh file needs no copy, and reopening a current file keeps its data and copies nothing', () {
-      final w = Workout(day: d1, slots: [Slot(squat, [done(100000, 5)])]);
+      final w = Workout(day: d1, entries: [Slot(squat, [done(100000, 5)])]);
       store.saveDay(w);
       store.close();
       store = Store.open(path);
@@ -301,7 +301,7 @@ void main() {
 
     test('a copy opens with the same history, and copying again replaces it', () {
       final copy = '$path.export';
-      store.saveDay(Workout(day: d1, slots: [Slot(squat, [done(100000, 5)])]));
+      store.saveDay(Workout(day: d1, entries: [Slot(squat, [done(100000, 5)])]));
       store.copyTo(copy);
       store.saveDay(Workout(day: d2, note: 'later'));
       store.copyTo(copy);
@@ -322,7 +322,7 @@ void main() {
     List<String> beforeRestore() => [for (final f in Directory(File(path).parent.path).listSync()) if (f.path.contains('.before-restore-')) f.path];
 
     test('restoring a copy brings its history back and keeps the database from before', () {
-      final exported = Workout(day: d1, slots: [Slot(squat, [done(100000, 5)])]);
+      final exported = Workout(day: d1, entries: [Slot(squat, [done(100000, 5)])]);
       store.saveDay(exported);
       final copy = '$path.export';
       store.copyTo(copy);
@@ -341,7 +341,7 @@ void main() {
     });
 
     test('restore refuses a file that is not a Setlist database this build can open, and changes nothing', () {
-      store.saveDay(Workout(day: d1, slots: [Slot(squat, [done(100000, 5)])]));
+      store.saveDay(Workout(day: d1, entries: [Slot(squat, [done(100000, 5)])]));
       final newer = '$path.newer';
       store.copyTo(newer);
       sqlite3.open(newer)
