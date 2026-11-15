@@ -70,6 +70,21 @@ def main():
         x1, y1 = find(args[0])
         dy = int(args[1])
         adb("shell", "input", "draganddrop", str(x1), str(y1), str(x1), str(y1 + dy), "1500")
+    elif cmd == "slide":
+        # A held drag in motion events, run on the phone in one go so the steps keep their pace. A drag handle starts on touch, and the list reads every move. With a file it screenshots before lifting the finger, which shows where the drop would land.
+        x1, y1, x2, y2 = map(int, args[:4])
+        steps = 16
+        script = [f"input motionevent DOWN {x1} {y1}"]
+        script += [f"input motionevent MOVE {x1 + (x2 - x1) * i // steps} {y1 + (y2 - y1) * i // steps}" for i in range(1, steps + 1)]
+        script.append("sleep 0.6")
+        if len(args) > 4:
+            script.append("screencap -p /data/local/tmp/setlist-slide.png")
+        script.append(f"input motionevent UP {x2} {y2}")
+        adb("shell", "; ".join(script))
+        if len(args) > 4:
+            with open(args[4], "wb") as f:
+                f.write(adb("exec-out", "cat", "/data/local/tmp/setlist-slide.png", binary=True))
+            adb("shell", "rm", "/data/local/tmp/setlist-slide.png")
     elif cmd == "swipe":
         adb("shell", "input", "swipe", *args)
     elif cmd == "type":
