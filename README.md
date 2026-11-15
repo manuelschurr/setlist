@@ -2,7 +2,7 @@
 
 <img src="docs/icon.png" alt="Setlist icon: a barbell with a check mark" width="96">
 
-Setlist is a strength training log for one lifter on Android, built to replace FitNotes. The whole day sits on one screen, a docked panel edits the highlighted set, an edit to set 1 carries down to the later planned sets that held the same value, logging the last set of an exercise moves on without asking, and each exercise card has a drag handle. It works offline and keeps everything in one SQLite file on the phone.
+Setlist is a strength training log for one lifter on Android, built to replace FitNotes. The whole day sits on one screen, a docked panel edits the highlighted set, an edit to set 1 carries down to the later planned sets that held the same value, logging the last set of an exercise moves on without asking, each exercise card has a drag handle, and exercises grouped into a superset take turns. It works offline and keeps everything in one SQLite file on the phone.
 
 `docs/design.md` says what the app does and why. `docs/architecture.md` says how the code is laid out.
 
@@ -17,7 +17,7 @@ Every release is signed with the same key, which is what lets a new version inst
 1. In FitNotes, open **Settings**, then **Backup**, then **Save Backup**, and save the file to Downloads.
 2. In Setlist, open **History**, tap the **Data** menu, then **Import FitNotes backup**, and pick that file.
 
-The import writes one Setlist set per FitNotes set and then lists what it left out, such as superset groups and comments on deleted sets. Sets on past days arrive as done. For today and later days, FitNotes' completion checkbox decides. Running the import again is safe. It refreshes days you have not touched in Setlist and never changes a day you have saved in Setlist.
+The import writes one Setlist set per FitNotes set and then lists what it left out, such as routines and comments on deleted sets. FitNotes superset groups arrive as supersets. Sets on past days arrive as done. For today and later days, FitNotes' completion checkbox decides. Running the import again is safe. It refreshes days you have not touched in Setlist and never changes a day you have saved in Setlist. Setlist before 0.3.0 left superset groups out, so importing the same backup again brings them to the days you have not changed in Setlist.
 
 A Google Drive automatic backup from FitNotes arrives as a zip file. Unzip it first.
 
@@ -42,7 +42,7 @@ On a new phone, install Setlist, open **History**, then **Data**, then **Restore
 | `SETLIST_FITNOTES_BACKUP=<file> scripts/fl test test/fitnotes_test.dart` | Also imports a real FitNotes backup and checks one set per `training_log` row. |
 | `SETLIST_RENDER_DIR=<dir> scripts/fl test test/render_screens_test.dart` | Draws the main screens to PNGs at the test phone's size, for layout review without a device. |
 | `python3 tools/icon.py [preview-dir]` | Regenerates the launcher icon layers, `docs/icon.svg` and `docs/icon.png` from the shapes in the script, and writes launcher-shaped previews when given a folder. |
-| `SETLIST_DEVICE=<host:port> scripts/device.py <command>` | Drives a phone over adb: `install`, `launch [package]`, `ui` (lists visible labels), `tap <label>`, `shot <file>`. |
+| `SETLIST_DEVICE=<host:port> scripts/device.py <command>` | Drives a phone over adb: `install`, `launch [package]`, `ui` (lists visible labels), `tap <label>`, `shot <file>`, `slide x1 y1 x2 y2 [file]` (a held drag, with a screenshot before the finger lifts). |
 
 Debug builds install as a separate app, `de.schurr.setlist.debug`, labelled Setlist debug, so testing never touches the installed release or its data.
 
