@@ -473,4 +473,40 @@ void main() {
     expect(find.text('Edit exercise'), findsOneWidget);
     expect(find.text('Superset with…'), findsNothing, reason: 'every exercise of the day is already in this superset');
   });
+
+  testWidgets('logging through the panel alternates a superset, names where it goes next, and rests only after each round', (tester) async {
+    store.saveDay(Workout(day: today, entries: [Superset([Slot(bench, sets(2, 80, 8)), Slot(row, sets(2, 60, 10))]), Slot(squat, sets(1, 100, 5))]));
+    await openToday(tester);
+    final rest = inPanel(find.textContaining('Rest '));
+    Future<void> logSet() async {
+      await tester.tap(inPanel(find.text('Log set')));
+      await tester.pumpAndSettle();
+    }
+
+    void expectPanel(String exercise, String line) {
+      expect(inPanel(find.text(exercise)), findsOneWidget);
+      expect(inPanel(find.text(line)), findsOneWidget);
+    }
+
+    expectPanel('Bench press', 'Set 1 of 2 · then Row');
+    await logSet();
+    expectPanel('Row', 'Set 1 of 2 · then Bench press');
+    expect(rest, findsNothing, reason: 'the round is not over');
+    expect(alarm.shown.last, isNull);
+
+    await logSet();
+    expectPanel('Bench press', 'Set 2 of 2 · then Row');
+    expect(rest, findsOneWidget);
+    expect(alarm.shown.last, isNotNull);
+
+    await logSet();
+    expectPanel('Row', 'Set 2 of 2');
+    expect(rest, findsNothing);
+
+    await logSet();
+    expectPanel('Squat', 'Set 1 of 1');
+    expect(rest, findsOneWidget);
+    expect(savedSets(bench).every((s) => s.isDone) && savedSets(row).every((s) => s.isDone), isTrue);
+  });
 }
+

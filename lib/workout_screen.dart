@@ -754,6 +754,9 @@ class _Panel extends StatelessWidget {
       final rest = state.workout.restAt(DateTime.now());
       final label = setLabels(slot.sets)[ref.index];
       final working = slot.sets.where((s) => !s.warmup).length;
+      // Asks the rule the log follows, so the panel never names a different exercise than the one the focus moves to.
+      final next = focusAfterLog(state.workout, ref);
+      final then = next == null || next.exercise == ref.exercise ? null : state.workout.entryOf(ref.exercise)!.slots.where((s) => s.exercise.id == next.exercise).firstOrNull?.exercise.name;
       content = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -764,7 +767,12 @@ class _Panel extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(slot.exercise.name, style: theme.textTheme.titleMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    Text(set.warmup ? 'Warm-up' : 'Set $label of $working', style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                    Text(
+                      '${set.warmup ? 'Warm-up' : 'Set $label of $working'}${then == null ? '' : ' · then $then'}',
+                      style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                 ),
               ),
