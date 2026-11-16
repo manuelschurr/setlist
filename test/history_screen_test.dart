@@ -12,6 +12,7 @@ import 'package:setlist/rest_alarm.dart';
 import 'package:setlist/store.dart';
 import 'package:setlist/workout_screen.dart';
 
+import 'drive_backup_test.dart' show FakeProvider;
 import 'fitnotes_test.dart' show trainingLogRows, writeFitNotes;
 
 final class FakeAlarm implements RestAlarm {
@@ -150,6 +151,30 @@ void main() {
     store.saveDay(Workout(day: Day.of(DateTime(now.year, now.month, now.day - 2)), entries: [Slot(squat, [done]), Superset([Slot(bench, [done]), Slot(row, [done])])]));
     await tester.pumpWidget(MaterialApp(home: HistoryScreen(store: store, home: Home(day: today, alarm: FakeAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)))));
     expect(find.text('Squat, Bench press + Row'), findsOneWidget);
+  });
+
+  testWidgets('restoring a Setlist backup from the data menu picks the file through the documents channel, restores it after confirming, and deletes the copy', (tester) async {
+    final dir = Directory.systemTemp.createTempSync('setlist_restore_');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final provider = FakeProvider();
+    addTearDown(provider.dispose);
+    final store = Store.open('${dir.path}/setlist.sqlite');
+    addTearDown(store.close);
+    Uint8List? restored;
+    final home = Home(day: Day.of(DateTime.now()), alarm: FakeAlarm(), restore: (path) => restored = File(path).readAsBytesSync(), backup: DriveBackup(dbPath: store.path!, store: () => store));
+    await tester.pumpWidget(MaterialApp(home: HistoryScreen(store: store, home: home)));
+    provider.pickNext = Uint8List.fromList([1, 2, 3]);
+
+    await tester.tap(find.byTooltip('Data'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Restore Setlist backup'));
+    await tester.pumpAndSettle();
+    expect(provider.nearSeen, [null]);
+    expect(find.text('Restore this backup?'), findsOneWidget);
+    await tester.tap(find.text('Restore'));
+    await tester.pumpAndSettle();
+    expect(restored, [1, 2, 3]);
+    expect(File('${store.path}.drive-restore').existsSync(), isFalse);
   });
 }
 

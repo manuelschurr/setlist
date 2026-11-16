@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.util.Log
 import io.flutter.plugin.common.MethodCall
@@ -14,21 +15,41 @@ import java.io.FileNotFoundException
 import java.io.OutputStream
 import java.util.concurrent.Executors
 
-/** A document the lifter created through the system picker, such as a file in Google Drive, which the app keeps writing after restarts through a persisted permission. */
+/** A folder the lifter picked through the system picker, such as one in Google Drive, which the app keeps creating and writing documents in after restarts through a persisted tree permission. Also the single file Setlist 0.2 and 0.3 linked, and one-off copies of a file the lifter picks to restore. */
 class Documents(private val activity: Activity) : MethodChannel.MethodCallHandler {
     // A getter, because the activity has no context yet when it constructs this.
     private val resolver get() = activity.contentResolver
     // A provider may block on its own work, such as Drive's, so copies run off the main thread, one at a time.
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
-    private var creating: MethodChannel.Result? = null
+    private var picking: Picking? = null
+
+    private sealed class Picking(val request: Int, val result: MethodChannel.Result) {
+        class Folder(result: MethodChannel.Result) : Picking(REQUEST_FOLDER, result)
+        class Copy(result: MethodChannel.Result, val to: File) : Picking(REQUEST_COPY, result)
+
+        fun cancel() = result.success(if (this is Copy) false else null)
+    }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         val uri = call.argument<String>("uri")?.let(Uri::parse)
+        val near = call.argument<String>("near")?.let(Uri::parse)
         when (call.method) {
-            "create" -> create(call.argument<String>("name")!!, result)
-            "write" -> offMain(result, uri!!) { write(uri, File(call.argument<String>("path")!!)) }
-            "read" -> offMain(result, uri!!) { read(uri, File(call.argument<String>("path")!!)) }
+            "openFolder" -> pick(Picking.Folder(result), Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), near)
+            "pickCopy" -> pick(Picking.Copy(result, File(call.argument<String>("path")!!)), Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), near)
+            "copyInto" -> {
+                val folder = Uri.parse(call.argument<String>("folder")!!)
+                offMain(result, folder) { copyInto(folder, call.argument<String>("name")!!, File(call.argument<String>("path")!!)) }
+            }
+            "write" -> offMain(result, uri!!) {
+                if (DocumentsContract.isTreeUri(uri)) refuseBinned(uri)
+                write(uri, File(call.argument<String>("path")!!))
+                null
+            }
+            "read" -> offMain(result, uri!!) {
+                read(uri, File(call.argument<String>("path")!!))
+                null
+            }
             "release" -> {
                 release(uri!!)
                 result.success(null)
@@ -37,31 +58,55 @@ class Documents(private val activity: Activity) : MethodChannel.MethodCallHandle
         }
     }
 
-    private fun create(name: String, result: MethodChannel.Result) {
-        creating?.success(null)
-        creating = result
-        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE, name)
-        activity.startActivityForResult(intent, REQUEST_CREATE)
+    private fun pick(next: Picking, intent: Intent, near: Uri?) {
+        picking?.cancel()
+        picking = next
+        if (near != null) intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, if (DocumentsContract.isTreeUri(near)) folderDocument(near) else near)
+        activity.startActivityForResult(intent, next.request)
     }
 
-    /** Returns whether the result was the picker's. */
+    /** Returns whether the result was one of this class's pickers. */
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
-        if (requestCode != REQUEST_CREATE) return false
-        val result = creating ?: return true
-        creating = null
+        if (requestCode != REQUEST_FOLDER && requestCode != REQUEST_COPY) return false
+        val pending = picking?.takeIf { it.request == requestCode } ?: return true
+        picking = null
         val uri = data?.data
         if (resultCode != Activity.RESULT_OK || uri == null) {
-            result.success(null)
+            pending.cancel()
             return true
         }
-        try {
-            resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            Log.i(TAG, "linked a document from ${uri.authority} with a persisted read and write permission")
-            result.success(mapOf("uri" to uri.toString(), "name" to (displayName(uri) ?: "Backup file")))
-        } catch (e: Exception) {
-            fail(result, uri, e)
+        when (pending) {
+            is Picking.Folder -> try {
+                resolver.takePersistableUriPermission(uri, READ_WRITE)
+                Log.i(TAG, "linked a folder from ${uri.authority} with a persisted read and write permission")
+                pending.result.success(mapOf("uri" to uri.toString(), "name" to (displayName(folderDocument(uri)) ?: "Backup folder")))
+            } catch (e: Exception) {
+                Log.w(TAG, "no lasting permission on a folder from ${uri.authority}: $e")
+                pending.result.error("denied", e.toString(), null)
+            }
+            is Picking.Copy -> offMain(pending.result, null) {
+                read(uri, pending.to)
+                true
+            }
         }
         return true
+    }
+
+    /** Never looks for an existing document by name: on Drive a second create makes a duplicate with the same name, and a listing can come back empty while it is still loading (measured 2026-11-15). */
+    private fun copyInto(tree: Uri, name: String, from: File): Map<String, String> {
+        refuseBinned(tree)
+        val doc = DocumentsContract.createDocument(resolver, folderDocument(tree), MIME, name) ?: throw FileNotFoundException("no document created in the folder")
+        try {
+            write(doc, from)
+        } catch (e: Exception) {
+            try {
+                DocumentsContract.deleteDocument(resolver, doc)
+            } catch (left: Exception) {
+                Log.w(TAG, "could not delete an unfilled document: $left")
+            }
+            throw e
+        }
+        return mapOf("uri" to doc.toString(), "name" to (displayName(doc) ?: name))
     }
 
     private fun write(uri: Uri, from: File) {
@@ -90,11 +135,34 @@ class Documents(private val activity: Activity) : MethodChannel.MethodCallHandle
 
     private fun release(uri: Uri) {
         try {
-            resolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            resolver.releasePersistableUriPermission(uri, READ_WRITE)
         } catch (e: SecurityException) {
             // Already gone, which is the state the caller asked for.
         }
     }
+
+    private fun holdsGrant(uri: Uri): Boolean = resolver.persistedUriPermissions.any { grant ->
+        grant.isReadPermission && grant.isWritePermission && if (DocumentsContract.isTreeUri(uri)) {
+            DocumentsContract.isTreeUri(grant.uri) && grant.uri.authority == uri.authority && DocumentsContract.getTreeDocumentId(grant.uri) == DocumentsContract.getTreeDocumentId(uri)
+        } else {
+            grant.uri == uri
+        }
+    }
+
+    /** Throws [Binned] when the folder behind a tree URI, or behind a document in it, is in the Drive bin. Drive keeps creating and writing documents in a binned folder without complaint and empties the bin after 30 days, and a binned folder loses its move flag (measured 2026-11-15: flags 332 live, 12 binned, 332 restored). Drive only, because another provider may never offer move on a folder. */
+    private fun refuseBinned(tree: Uri) {
+        if (tree.authority != DRIVE) return
+        val flags = try {
+            resolver.query(folderDocument(tree), arrayOf(DocumentsContract.Document.COLUMN_FLAGS), null, null, null)?.use { if (it.moveToFirst()) it.getInt(0) else null }
+        } catch (e: Exception) {
+            null
+        } ?: return
+        if (flags and DocumentsContract.Document.FLAG_SUPPORTS_MOVE == 0) throw Binned()
+    }
+
+    private class Binned : Exception("the backup folder is in the Drive bin")
+
+    private fun folderDocument(tree: Uri): Uri = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
 
     private fun displayName(uri: Uri): String? = try {
         resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
@@ -102,24 +170,29 @@ class Documents(private val activity: Activity) : MethodChannel.MethodCallHandle
         null
     }
 
-    private fun offMain(result: MethodChannel.Result, uri: Uri, work: () -> Unit) {
+    private fun offMain(result: MethodChannel.Result, granted: Uri?, work: () -> Any?) {
         io.execute {
             try {
-                work()
-                main.post { result.success(null) }
+                val value = work()
+                main.post { result.success(value) }
             } catch (e: Exception) {
-                main.post { fail(result, uri, e) }
+                val code = when {
+                    e is Binned -> "binned"
+                    granted != null && !holdsGrant(granted) -> "denied"
+                    else -> "failed"
+                }
+                Log.w(TAG, "document call failed as $code for ${granted?.authority}: $e")
+                main.post { result.error(code, e.toString(), null) }
             }
         }
     }
 
-    private fun fail(result: MethodChannel.Result, uri: Uri?, e: Exception) {
-        Log.w(TAG, "document call failed for ${uri?.authority}: $e")
-        result.error(if (e is SecurityException) "denied" else "failed", e.toString(), null)
-    }
-
     companion object {
         private const val TAG = "SetlistDocuments"
-        private const val REQUEST_CREATE = 7301
+        private const val MIME = "application/octet-stream"
+        private const val DRIVE = "com.google.android.apps.docs.storage"
+        private const val READ_WRITE = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        private const val REQUEST_FOLDER = 7301
+        private const val REQUEST_COPY = 7302
     }
 }
