@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 
 import 'day.dart';
 import 'drive_backup.dart';
+import 'equipment_mark.dart';
 import 'exercise_history_screen.dart';
 import 'exercise_picker.dart';
 import 'history_screen.dart';
@@ -626,6 +627,7 @@ class _SlotCard extends StatelessWidget {
                   label: labels[i],
                   set: slot.sets[i],
                   kind: kind,
+                  equipment: slot.exercise.equipment,
                   lastTime: lastTime[i]?.describe(kind),
                   focused: focus == (exercise: id, index: i),
                   onTap: () => onCommand(FocusSet((exercise: id, index: i))),
@@ -684,11 +686,12 @@ Future<void> _showSetOptions(BuildContext context, SetRef ref, SetEntry set, Val
 }
 
 class _SetRow extends StatelessWidget {
-  const _SetRow({required this.label, required this.set, required this.kind, required this.lastTime, required this.focused, required this.onTap, required this.onCheck, required this.onLongPress});
+  const _SetRow({required this.label, required this.set, required this.kind, required this.equipment, required this.lastTime, required this.focused, required this.onTap, required this.onCheck, required this.onLongPress});
 
   final String label;
   final SetEntry set;
   final ExerciseKind kind;
+  final Equipment equipment;
   final String? lastTime;
   final bool focused;
   final VoidCallback onTap;
@@ -716,7 +719,12 @@ class _SetRow extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(setText(set, kind), style: theme.textTheme.bodyLarge?.copyWith(color: onRow, fontWeight: focused ? FontWeight.w600 : null)),
+                      Row(
+                        children: [
+                          EquipmentMark(equipment, height: 20, color: onRow ?? muted),
+                          Flexible(child: Text(setText(set, kind), style: theme.textTheme.bodyLarge?.copyWith(color: onRow, fontWeight: focused ? FontWeight.w600 : null))),
+                        ],
+                      ),
                       if (set.note.isNotEmpty) Text(set.note, style: theme.textTheme.bodySmall?.copyWith(color: muted, fontStyle: FontStyle.italic)),
                     ],
                   ),
@@ -758,6 +766,8 @@ class _Panel extends StatelessWidget {
       // Asks the rule the log follows, so the panel never names a different exercise than the one the focus moves to.
       final next = focusAfterLog(state.workout, ref);
       final then = next == null || next.exercise == ref.exercise ? null : state.workout.entryOf(ref.exercise)!.slots.where((s) => s.exercise.id == next.exercise).firstOrNull?.exercise.name;
+      final equipment = slot.exercise.equipment;
+      final caption = equipment.breakdown(set.grams);
       content = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -791,6 +801,9 @@ class _Panel extends StatelessWidget {
                     value: field.read(set),
                     onStep: (up) => onCommand(SetField(ref, field, field.stepped(slot.exercise, field.read(set), up: up))),
                     onTyped: (value) => onCommand(SetField(ref, field, value)),
+                    mark: field == Field.weight ? equipment : Equipment.none,
+                    // A blank line under the other stepper keeps both button rows level.
+                    caption: field == Field.weight || caption == null ? caption : '',
                   ),
                 ),
               ],
@@ -820,18 +833,24 @@ class _Panel extends StatelessWidget {
 
 /// [onTyped] fires once, when the dialog is confirmed, never per keystroke. Each call runs the cascade, and typing 10 over a 5 would pass through 1 and capture any later planned set that really held 1.
 class _Stepper extends StatelessWidget {
-  const _Stepper({required this.field, required this.value, required this.onStep, required this.onTyped});
+  const _Stepper({required this.field, required this.value, required this.onStep, required this.onTyped, required this.mark, required this.caption});
 
   final Field field;
   final int value;
   final ValueChanged<bool> onStep;
   final ValueChanged<int> onTyped;
+  final Equipment mark;
+
+  /// One line under the value, from [Equipment.breakdown]. Null leaves the line out; an empty string keeps it blank.
+  final String? caption;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
     final unit = unitOf(field);
     final name = field.name;
+    final spoken = caption == null || caption!.isEmpty ? '' : ', $caption';
     Widget button(IconData icon, String tooltip, bool up) => Expanded(
       child: Tooltip(
         message: tooltip,
@@ -854,19 +873,26 @@ class _Stepper extends StatelessWidget {
           child: SizedBox(
             height: 48,
             width: double.infinity,
-            child: Center(
-              child: Text.rich(
-                TextSpan(
-                  children: [
-                    TextSpan(text: field.format(value), style: theme.textTheme.headlineMedium),
-                    if (unit != null) TextSpan(text: ' $unit', style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                  ],
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                EquipmentMark(mark, height: 22, color: muted),
+                Flexible(
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(text: field.format(value), style: theme.textTheme.headlineMedium),
+                        if (unit != null) TextSpan(text: ' $unit', style: theme.textTheme.bodyMedium?.copyWith(color: muted)),
+                      ],
+                    ),
+                    semanticsLabel: '$name ${field.format(value)}${unit == null ? '' : ' $unit'}$spoken, tap to type',
+                  ),
                 ),
-                semanticsLabel: '$name ${field.format(value)}${unit == null ? '' : ' $unit'}, tap to type',
-              ),
+              ],
             ),
           ),
         ),
+        if (caption != null) Text(caption!, style: theme.textTheme.bodySmall?.copyWith(color: muted), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
         const SizedBox(height: 4),
         Row(children: [button(Icons.remove, 'Decrease $name', false), const SizedBox(width: 8), button(Icons.add, 'Increase $name', true)]),
       ],

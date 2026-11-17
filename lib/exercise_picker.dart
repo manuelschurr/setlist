@@ -3,6 +3,7 @@ library;
 import 'package:flutter/material.dart';
 
 import 'day.dart';
+import 'equipment_mark.dart';
 import 'store.dart';
 import 'workout_screen.dart';
 
@@ -201,7 +202,15 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
                     _ => Barbell.standardBarGrams,
                   },
                 ))
-                  DropdownMenuItem(value: e, child: Text(e.label)),
+                  DropdownMenuItem(
+                    value: e,
+                    child: Row(
+                      children: [
+                        EquipmentMark(e, height: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        Flexible(child: Text(e.label)),
+                      ],
+                    ),
+                  ),
               ],
               onChanged: (e) => setState(() => _equipment = e ?? _equipment),
             ),

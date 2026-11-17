@@ -365,6 +365,79 @@ void main() {
     expect(storedEquipment(squat), Equipment.none);
   });
 
+  Exercise withEquipment(Exercise e, Equipment equipment) {
+    final changed = Exercise(id: e.id, name: e.name, kind: e.kind, equipment: equipment, category: e.category, weightStepGrams: e.weightStepGrams, rest: e.rest);
+    store.updateExercise(changed);
+    return changed;
+  }
+
+  testWidgets('a barbell marks its rows and splits the total under the weight in the panel', (tester) async {
+    final semantics = tester.ensureSemantics();
+    squat = withEquipment(squat, const Barbell(20000));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(2, 60, 5))]));
+    await openToday(tester);
+    expect(find.text('60 kg × 5'), findsNWidgets(2));
+    expect(find.bySemanticsLabel(RegExp(r'^Barbell$', multiLine: true)), findsNWidgets(3), reason: 'two rows and the panel');
+    expect(inPanel(find.text('60 kg')), findsOneWidget);
+    expect(inPanel(find.text('20 kg a side · 20 kg bar')), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp('weight 60 kg, 20 kg a side · 20 kg bar, tap to type')), findsOneWidget);
+
+    await tester.tap(inPanel(find.byTooltip('Increase weight')));
+    await tester.pump();
+    expect(inPanel(find.text('21.25 kg a side · 20 kg bar')), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets('a pair shows each dumbbell, one dumbbell only its mark, and no equipment nothing', (tester) async {
+    final semantics = tester.ensureSemantics();
+    bench = withEquipment(bench, Equipment.dumbbellPair);
+    row = withEquipment(row, Equipment.oneDumbbell);
+    store.saveDay(Workout(day: today, entries: [Slot(bench, sets(1, 12, 10)), Slot(row, sets(1, 6, 10)), Slot(squat, sets(1, 100, 5))]));
+    await openToday(tester);
+    expect(find.text('12 kg × 10'), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp(r'^Two dumbbells$', multiLine: true)), findsNWidgets(2));
+    expect(find.bySemanticsLabel(RegExp(r'^One dumbbell$', multiLine: true)), findsOneWidget);
+    expect(inPanel(find.text('6 kg each')), findsOneWidget);
+
+    await tester.tap(find.text('6 kg × 10'));
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel(RegExp(r'^One dumbbell$', multiLine: true)), findsNWidgets(2));
+    expect(inPanel(find.textContaining('each')), findsNothing);
+    expect(inPanel(find.textContaining(' bar')), findsNothing);
+
+    await tester.tap(find.text('100 kg × 5'));
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel(RegExp(r'^weight 100 kg, tap to type$')), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets('the caption keeps its line at 0 kg and the button rows stay level', (tester) async {
+    bench = withEquipment(bench, Equipment.dumbbellPair);
+    store.saveDay(Workout(day: today, entries: [Slot(bench, [kg(12, 10), kg(0, 10)])]));
+    await openToday(tester);
+    Rect rect(String tooltip) => tester.getRect(inPanel(find.byTooltip(tooltip)));
+    final panelAt12 = tester.getSize(panel);
+    expect(rect('Decrease weight').top, rect('Decrease reps').top);
+
+    await tester.tap(find.text('0 kg × 10'));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(panel), panelAt12);
+    expect(rect('Decrease weight').top, rect('Decrease reps').top);
+  });
+
+  testWidgets('choosing equipment in the edit dialog marks the open day at once', (tester) async {
+    final semantics = tester.ensureSemantics();
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 12, 10))]));
+    await openToday(tester);
+    await openEdit(tester, 'Squat');
+    await chooseEquipment(tester, 'Two dumbbells');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel(RegExp(r'^Two dumbbells$', multiLine: true)), findsNWidgets(2));
+    expect(inPanel(find.text('6 kg each')), findsOneWidget);
+    semantics.dispose();
+  });
+
   testWidgets('history returns to the home screen for today, and its Copy fills today there', (tester) async {
     store.saveDay(Workout(day: daysAgo(2), entries: [Slot(squat, sets(3, 100, 5, done: true))]));
     store.saveDay(Workout(day: today, entries: [Slot(bench, sets(2, 80, 8))]));

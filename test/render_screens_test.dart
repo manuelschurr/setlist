@@ -12,7 +12,7 @@ import 'package:setlist/rest_alarm.dart';
 import 'package:setlist/store.dart';
 import 'package:setlist/workout_screen.dart';
 
-/// Renders the main screens to PNGs at the test phone's size, with real fonts, so a layout can be reviewed without a device. Runs only when SETLIST_RENDER_DIR names an output folder.
+/// Renders the main screens to PNGs at the test phone's size, with real fonts, so a layout can be reviewed without a device. The renders run only when SETLIST_RENDER_DIR names an output folder; the check that text fits runs always.
 final class _SilentAlarm implements RestAlarm {
   @override
   void show(Rest? rest) {}
@@ -49,6 +49,22 @@ void main() {
       await File('$out/$name.png').writeAsBytes(png!.buffer.asUint8List());
     });
   }
+
+  testWidgets('the longest usual barbell caption fits its stepper on the test phone, in real fonts', (tester) async {
+    await tester.runAsync(_loadFonts);
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.8125;
+    addTearDown(tester.view.reset);
+    final store = Store.inMemory();
+    addTearDown(store.close);
+    final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, equipment: const Barbell(20000));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, [const SetEntry(grams: 102500, reps: 5)])]));
+    await tester.pumpWidget(MaterialApp(theme: setlistTheme(Brightness.light), home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today)));
+    await tester.pumpAndSettle();
+    final caption = find.text(const Barbell(20000).breakdown(102500));
+    expect(caption, findsOneWidget);
+    expect(tester.renderObject<RenderParagraph>(find.descendant(of: caption, matching: find.byType(RichText))).didExceedMaxLines, isFalse);
+  });
 
   testWidgets('render the workout flow', (tester) async {
     await tester.runAsync(_loadFonts);
