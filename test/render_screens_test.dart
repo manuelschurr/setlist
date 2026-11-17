@@ -74,9 +74,9 @@ void main() {
 
     final store = Store.inMemory();
     addTearDown(store.close);
-    final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, category: 'Legs');
-    final bench = store.createExercise(name: 'Incline Dumbbell Bench Press', kind: ExerciseKind.weightReps, category: 'Chest');
-    final raise = store.createExercise(name: 'Lateral Dumbbell Raise', kind: ExerciseKind.weightReps, category: 'Shoulders');
+    final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, category: 'Legs', equipment: const Barbell(20000));
+    final bench = store.createExercise(name: 'Incline Dumbbell Bench Press', kind: ExerciseKind.weightReps, category: 'Chest', equipment: Equipment.dumbbellPair);
+    final raise = store.createExercise(name: 'Lateral Dumbbell Raise', kind: ExerciseKind.weightReps, category: 'Shoulders', equipment: Equipment.oneDumbbell);
     final plank = store.createExercise(name: 'Plank', kind: ExerciseKind.time, category: 'Core');
     store.saveDay(Workout(day: daysAgo(3), entries: [
       Slot(squat, [kg(20, 8, warmup: true), kg(34, 5), kg(34, 5), kg(34, 5)]),
@@ -128,10 +128,10 @@ void main() {
 
     final store = Store.inMemory();
     addTearDown(store.close);
-    final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, category: 'Legs');
-    final bench = store.createExercise(name: 'Incline Dumbbell Bench Press', kind: ExerciseKind.weightReps, category: 'Chest');
+    final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, category: 'Legs', equipment: const Barbell(20000));
+    final bench = store.createExercise(name: 'Incline Dumbbell Bench Press', kind: ExerciseKind.weightReps, category: 'Chest', equipment: Equipment.dumbbellPair);
     final row = store.createExercise(name: 'Chest Supported Row', kind: ExerciseKind.weightReps, category: 'Back');
-    final raise = store.createExercise(name: 'Lateral Dumbbell Raise', kind: ExerciseKind.weightReps, category: 'Shoulders');
+    final raise = store.createExercise(name: 'Lateral Dumbbell Raise', kind: ExerciseKind.weightReps, category: 'Shoulders', equipment: Equipment.oneDumbbell);
     final curl = store.createExercise(name: 'Cable Curl', kind: ExerciseKind.weightReps, category: 'Arms');
     final pushdown = store.createExercise(name: 'Triceps Pushdown', kind: ExerciseKind.weightReps, category: 'Arms');
     SetEntry plan(num w, int r) => SetEntry(grams: (w * 1000).round(), reps: r);
