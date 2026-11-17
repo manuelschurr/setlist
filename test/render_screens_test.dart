@@ -12,7 +12,6 @@ import 'package:setlist/rest_alarm.dart';
 import 'package:setlist/store.dart';
 import 'package:setlist/workout_screen.dart';
 
-/// Renders the main screens to PNGs at the test phone's size, with real fonts, so a layout can be reviewed without a device. Runs only when SETLIST_RENDER_DIR names an output folder.
 final class _SilentAlarm implements RestAlarm {
   @override
   void show(Rest? rest) {}
@@ -50,6 +49,22 @@ void main() {
     });
   }
 
+  testWidgets('the longest usual barbell caption fits its stepper on the test phone, in real fonts', (tester) async {
+    await tester.runAsync(_loadFonts);
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.8125;
+    addTearDown(tester.view.reset);
+    final store = Store.inMemory();
+    addTearDown(store.close);
+    final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, equipment: const Barbell(20000));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, [const SetEntry(grams: 102500, reps: 5)])]));
+    await tester.pumpWidget(MaterialApp(theme: setlistTheme(Brightness.light), home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today)));
+    await tester.pumpAndSettle();
+    final caption = find.text(const Barbell(20000).breakdown(102500));
+    expect(caption, findsOneWidget);
+    expect(tester.renderObject<RenderParagraph>(find.descendant(of: caption, matching: find.byType(RichText))).didExceedMaxLines, isFalse);
+  });
+
   testWidgets('render the workout flow', (tester) async {
     await tester.runAsync(_loadFonts);
     tester.view.physicalSize = const Size(1080, 2400);
@@ -58,9 +73,9 @@ void main() {
 
     final store = Store.inMemory();
     addTearDown(store.close);
-    final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, category: 'Legs');
-    final bench = store.createExercise(name: 'Incline Dumbbell Bench Press', kind: ExerciseKind.weightReps, category: 'Chest');
-    final raise = store.createExercise(name: 'Lateral Dumbbell Raise', kind: ExerciseKind.weightReps, category: 'Shoulders');
+    final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, category: 'Legs', equipment: const Barbell(20000));
+    final bench = store.createExercise(name: 'Incline Dumbbell Bench Press', kind: ExerciseKind.weightReps, category: 'Chest', equipment: Equipment.dumbbellPair);
+    final raise = store.createExercise(name: 'Lateral Dumbbell Raise', kind: ExerciseKind.weightReps, category: 'Shoulders', equipment: Equipment.oneDumbbell);
     final plank = store.createExercise(name: 'Plank', kind: ExerciseKind.time, category: 'Core');
     store.saveDay(Workout(day: daysAgo(3), entries: [
       Slot(squat, [kg(20, 8, warmup: true), kg(34, 5), kg(34, 5), kg(34, 5)]),
@@ -112,10 +127,10 @@ void main() {
 
     final store = Store.inMemory();
     addTearDown(store.close);
-    final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, category: 'Legs');
-    final bench = store.createExercise(name: 'Incline Dumbbell Bench Press', kind: ExerciseKind.weightReps, category: 'Chest');
+    final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, category: 'Legs', equipment: const Barbell(20000));
+    final bench = store.createExercise(name: 'Incline Dumbbell Bench Press', kind: ExerciseKind.weightReps, category: 'Chest', equipment: Equipment.dumbbellPair);
     final row = store.createExercise(name: 'Chest Supported Row', kind: ExerciseKind.weightReps, category: 'Back');
-    final raise = store.createExercise(name: 'Lateral Dumbbell Raise', kind: ExerciseKind.weightReps, category: 'Shoulders');
+    final raise = store.createExercise(name: 'Lateral Dumbbell Raise', kind: ExerciseKind.weightReps, category: 'Shoulders', equipment: Equipment.oneDumbbell);
     final curl = store.createExercise(name: 'Cable Curl', kind: ExerciseKind.weightReps, category: 'Arms');
     final pushdown = store.createExercise(name: 'Triceps Pushdown', kind: ExerciseKind.weightReps, category: 'Arms');
     SetEntry plan(num w, int r) => SetEntry(grams: (w * 1000).round(), reps: r);

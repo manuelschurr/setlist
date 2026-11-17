@@ -296,6 +296,148 @@ void main() {
     expect(find.text('An exercise with this name exists'), findsOneWidget);
   });
 
+  Future<void> openEdit(WidgetTester tester, String name) async {
+    await tester.ensureVisible(find.byTooltip('More for $name'));
+    await tester.tap(find.byTooltip('More for $name'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit exercise'));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> chooseEquipment(WidgetTester tester, String label) async {
+    await tester.tap(find.byType(DropdownButtonFormField<Equipment>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(label).last);
+    await tester.pumpAndSettle();
+  }
+
+  Equipment storedEquipment(Exercise e) => store.exercises().singleWhere((x) => x.id == e.id).equipment;
+
+  testWidgets('creating an exercise offers equipment for a kind with a weight and stores the choice', (tester) async {
+    await openToday(tester);
+    await tester.tap(find.text('Add exercise'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Hammer curl');
+    await tester.pump();
+    await tester.tap(find.text('Create "Hammer curl"'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(DropdownButtonFormField<Equipment>, 'None'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Bar weight'), findsNothing);
+    await chooseEquipment(tester, 'Two dumbbells');
+    await tester.tap(find.widgetWithText(FilledButton, 'Create'));
+    await tester.pumpAndSettle();
+    expect(store.exercises().singleWhere((e) => e.name == 'Hammer curl').equipment, Equipment.dumbbellPair);
+  });
+
+  testWidgets('editing an exercise sets a barbell with its bar weight, and a later edit of only the name keeps it', (tester) async {
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 60, 5))]));
+    await openToday(tester);
+    await openEdit(tester, 'Squat');
+    await chooseEquipment(tester, 'Barbell');
+    final bar = find.widgetWithText(TextField, 'Bar weight');
+    expect(tester.widget<TextField>(bar).controller!.text, '20');
+    await tester.enterText(bar, '15');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(storedEquipment(squat), const Barbell(15000));
+
+    await openEdit(tester, 'Squat');
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Bar weight')).controller!.text, '15');
+    await tester.enterText(find.widgetWithText(TextField, 'Name'), 'Back squat');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(storedEquipment(squat), const Barbell(15000));
+    expect(store.loadDay(today).slots.single.exercise.equipment, const Barbell(15000));
+  });
+
+  testWidgets('a bar weight of 0 or not a number keeps the dialog open with the error', (tester) async {
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 60, 5))]));
+    await openToday(tester);
+    await openEdit(tester, 'Squat');
+    await chooseEquipment(tester, 'Barbell');
+    for (final typed in ['0', 'abc']) {
+      await tester.enterText(find.widgetWithText(TextField, 'Bar weight'), typed);
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(find.text('Type a bar weight above 0, such as 20'), findsOneWidget, reason: typed);
+      expect(find.text('Edit exercise'), findsOneWidget, reason: typed);
+    }
+    expect(storedEquipment(squat), Equipment.none);
+  });
+
+  Exercise withEquipment(Exercise e, Equipment equipment) {
+    final changed = Exercise(id: e.id, name: e.name, kind: e.kind, equipment: equipment, category: e.category, weightStepGrams: e.weightStepGrams, rest: e.rest);
+    store.updateExercise(changed);
+    return changed;
+  }
+
+  testWidgets('a barbell marks its rows and splits the total under the weight in the panel', (tester) async {
+    final semantics = tester.ensureSemantics();
+    squat = withEquipment(squat, const Barbell(20000));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(2, 60, 5))]));
+    await openToday(tester);
+    expect(find.text('60 kg × 5'), findsNWidgets(2));
+    expect(find.bySemanticsLabel(RegExp(r'^Barbell$', multiLine: true)), findsNWidgets(3), reason: 'two rows and the panel');
+    expect(inPanel(find.text('60 kg')), findsOneWidget);
+    expect(inPanel(find.text('20 kg a side · 20 kg bar')), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp('weight 60 kg, 20 kg a side · 20 kg bar, tap to type')), findsOneWidget);
+
+    await tester.tap(inPanel(find.byTooltip('Increase weight')));
+    await tester.pump();
+    expect(inPanel(find.text('21.25 kg a side · 20 kg bar')), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets('a pair shows each dumbbell, one dumbbell only its mark, and no equipment nothing', (tester) async {
+    final semantics = tester.ensureSemantics();
+    bench = withEquipment(bench, Equipment.dumbbellPair);
+    row = withEquipment(row, Equipment.oneDumbbell);
+    store.saveDay(Workout(day: today, entries: [Slot(bench, sets(1, 12, 10)), Slot(row, sets(1, 6, 10)), Slot(squat, sets(1, 100, 5))]));
+    await openToday(tester);
+    expect(find.text('12 kg × 10'), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp(r'^Two dumbbells$', multiLine: true)), findsNWidgets(2));
+    expect(find.bySemanticsLabel(RegExp(r'^One dumbbell$', multiLine: true)), findsOneWidget);
+    expect(inPanel(find.text('6 kg each')), findsOneWidget);
+
+    await tester.tap(find.text('6 kg × 10'));
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel(RegExp(r'^One dumbbell$', multiLine: true)), findsNWidgets(2));
+    expect(inPanel(find.textContaining('each')), findsNothing);
+    expect(inPanel(find.textContaining(' bar')), findsNothing);
+
+    await tester.tap(find.text('100 kg × 5'));
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel(RegExp(r'^weight 100 kg, tap to type$')), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets('the caption keeps its line at 0 kg and the button rows stay level', (tester) async {
+    bench = withEquipment(bench, Equipment.dumbbellPair);
+    store.saveDay(Workout(day: today, entries: [Slot(bench, [kg(12, 10), kg(0, 10)])]));
+    await openToday(tester);
+    Rect rect(String tooltip) => tester.getRect(inPanel(find.byTooltip(tooltip)));
+    final panelAt12 = tester.getSize(panel);
+    expect(rect('Decrease weight').top, rect('Decrease reps').top);
+
+    await tester.tap(find.text('0 kg × 10'));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(panel), panelAt12);
+    expect(rect('Decrease weight').top, rect('Decrease reps').top);
+  });
+
+  testWidgets('choosing equipment in the edit dialog marks the open day at once', (tester) async {
+    final semantics = tester.ensureSemantics();
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 12, 10))]));
+    await openToday(tester);
+    await openEdit(tester, 'Squat');
+    await chooseEquipment(tester, 'Two dumbbells');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel(RegExp(r'^Two dumbbells$', multiLine: true)), findsNWidgets(2));
+    expect(inPanel(find.text('6 kg each')), findsOneWidget);
+    semantics.dispose();
+  });
+
   testWidgets('history returns to the home screen for today, and its Copy fills today there', (tester) async {
     store.saveDay(Workout(day: daysAgo(2), entries: [Slot(squat, sets(3, 100, 5, done: true))]));
     store.saveDay(Workout(day: today, entries: [Slot(bench, sets(2, 80, 8))]));

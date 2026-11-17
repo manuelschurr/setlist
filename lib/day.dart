@@ -169,9 +169,110 @@ final class SetEntry {
   int get hashCode => Object.hash(grams, reps, metres, seconds, warmup, note, status);
 }
 
+/// What the logged weight is lifted with. The logged weight is always the total load, so equipment never changes a set, e1RM, volume, the cascade or the step; it only explains how the total splits, for the marker and the panel's breakdown line. A bar weight exists only on [Barbell], so a bar on a dumbbell exercise cannot be built.
+sealed class Equipment {
+  const Equipment();
+
+  static const none = NoEquipment._();
+  static const dumbbellPair = DumbbellPair._();
+  static const oneDumbbell = OneDumbbell._();
+
+  /// Every equipment value in the dialog's order.
+  static List<Equipment> choices({required int barGrams}) => [none, Barbell(barGrams), dumbbellPair, oneDumbbell];
+
+  /// Parses a stored [name] back. Throws [FormatException] unless [barGrams] is given exactly for a barbell and is above 0.
+  factory Equipment.named(String name, {int? barGrams}) {
+    final match = barGrams != null && barGrams <= 0 ? null : choices(barGrams: barGrams ?? Barbell.standardBarGrams).where((e) => e.name == name).firstOrNull;
+    if (match == null || (match is Barbell) != (barGrams != null)) throw FormatException('not a stored equipment', '$name/$barGrams');
+    return match;
+  }
+
+  /// Stored in `exercise.equipment`. Never shown.
+  String get name;
+
+  /// Shown in the dialog and read out as the marker's semantics label.
+  String get label;
+
+  /// The panel's line under the weight for the logged total [grams]. Null exactly for equipment that never splits a total, whatever [grams] is. An empty string for a total of 0 or less.
+  String? breakdown(int grams);
+}
+
+final class NoEquipment extends Equipment {
+  const NoEquipment._();
+
+  @override
+  String get name => 'none';
+
+  @override
+  String get label => 'None';
+
+  @override
+  String? breakdown(int grams) => null;
+}
+
+/// A bar with the same plates on each side. [barGrams] is per exercise.
+final class Barbell extends Equipment {
+  const Barbell(this.barGrams) : assert(barGrams > 0);
+
+  static const standardBarGrams = 20000;
+
+  final int barGrams;
+
+  @override
+  String get name => 'barbell';
+
+  @override
+  String get label => 'Barbell';
+
+  @override
+  String breakdown(int grams) {
+    final bar = Field.weight.format(barGrams);
+    if (grams <= 0) return '';
+    if (grams == barGrams) return 'just the $bar kg bar';
+    if (grams < barGrams) return 'less than the $bar kg bar';
+    return '${Field.weight.format(_half(grams - barGrams))} kg a side · $bar kg bar';
+  }
+
+  @override
+  bool operator ==(Object other) => other is Barbell && other.barGrams == barGrams;
+
+  @override
+  int get hashCode => barGrams.hashCode;
+}
+
+/// Two dumbbells of the same weight, logged as their sum: hammer curls at 12 kg are two 6 kg dumbbells.
+final class DumbbellPair extends Equipment {
+  const DumbbellPair._();
+
+  @override
+  String get name => 'dumbbellPair';
+
+  @override
+  String get label => 'Two dumbbells';
+
+  @override
+  String breakdown(int grams) => grams <= 0 ? '' : '${Field.weight.format(_half(grams))} kg each';
+}
+
+/// One dumbbell, logged as its own weight.
+final class OneDumbbell extends Equipment {
+  const OneDumbbell._();
+
+  @override
+  String get name => 'oneDumbbell';
+
+  @override
+  String get label => 'One dumbbell';
+
+  @override
+  String? breakdown(int grams) => null;
+}
+
+int _half(int grams) => grams ~/ 2;
+
 /// An exercise as a day sees it. A [Slot] holds a copy; the exercise table in the store owns the original, and [UpdateExercise] refreshes the copy after an edit.
 final class Exercise {
-  const Exercise({required this.id, required this.name, required this.kind, this.category, this.weightStepGrams = 2500, this.rest = const Duration(minutes: 2)});
+  const Exercise({required this.id, required this.name, required this.kind, required this._equipment, this.category, this.weightStepGrams = 2500, this.rest = const Duration(minutes: 2)});
 
   final ExerciseId id;
   final String name;
@@ -179,12 +280,16 @@ final class Exercise {
   final String? category;
   final int weightStepGrams;
   final Duration rest;
+  final Equipment _equipment;
+
+  /// [Equipment.none] for a kind without a weight, whatever was set.
+  Equipment get equipment => kind.fields.contains(Field.weight) ? _equipment : Equipment.none;
 
   @override
-  bool operator ==(Object other) => other is Exercise && other.id == id && other.name == name && other.kind == kind && other.category == category && other.weightStepGrams == weightStepGrams && other.rest == rest;
+  bool operator ==(Object other) => other is Exercise && other.id == id && other.name == name && other.kind == kind && other.category == category && other.weightStepGrams == weightStepGrams && other.rest == rest && other.equipment == equipment;
 
   @override
-  int get hashCode => Object.hash(id, name, kind, category, weightStepGrams, rest);
+  int get hashCode => Object.hash(id, name, kind, category, weightStepGrams, rest, equipment);
 }
 
 /// One item of a day's list: a plain exercise or a superset.
