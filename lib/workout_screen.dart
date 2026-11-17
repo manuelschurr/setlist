@@ -768,6 +768,7 @@ class _Panel extends StatelessWidget {
       final then = next == null || next.exercise == ref.exercise ? null : state.workout.entryOf(ref.exercise)!.slots.where((s) => s.exercise.id == next.exercise).firstOrNull?.exercise.name;
       final equipment = slot.exercise.equipment;
       final caption = equipment.breakdown(set.grams);
+      final blankToLevelButtons = caption == null ? null : '';
       content = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -802,8 +803,7 @@ class _Panel extends StatelessWidget {
                     onStep: (up) => onCommand(SetField(ref, field, field.stepped(slot.exercise, field.read(set), up: up))),
                     onTyped: (value) => onCommand(SetField(ref, field, value)),
                     mark: field == Field.weight ? equipment : Equipment.none,
-                    // A blank line under the other stepper keeps both button rows level.
-                    caption: field == Field.weight || caption == null ? caption : '',
+                    caption: field == Field.weight ? caption : blankToLevelButtons,
                   ),
                 ),
               ],
@@ -840,8 +840,6 @@ class _Stepper extends StatelessWidget {
   final ValueChanged<bool> onStep;
   final ValueChanged<int> onTyped;
   final Equipment mark;
-
-  /// One line under the value, from [Equipment.breakdown]. Null leaves the line out; an empty string keeps it blank.
   final String? caption;
 
   @override

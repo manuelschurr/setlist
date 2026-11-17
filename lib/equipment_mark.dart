@@ -4,15 +4,13 @@ import 'package:flutter/widgets.dart';
 
 import 'day.dart';
 
-/// The passive marker drawn before a weight. Material has no barbell, dumbbell pair or single dumbbell icon, so this paints its own glyph in [color], [height] logical pixels tall and scaled with the text beside it. Draws nothing for [Equipment.none], so callers place it unconditionally. A sibling of the value text, never a span inside it, so the value text stays one exact string.
+/// The passive marker drawn before a weight, in [color], [height] logical pixels tall and scaled with the text beside it. Draws nothing for [Equipment.none].
 class EquipmentMark extends StatelessWidget {
   const EquipmentMark(this.equipment, {super.key, required this.height, required this.color, this.gap = 8});
 
   final Equipment equipment;
   final double height;
   final Color color;
-
-  /// Space after the glyph, part of the mark so it goes with it.
   final double gap;
 
   @override
@@ -34,7 +32,6 @@ class EquipmentMark extends StatelessWidget {
   }
 }
 
-/// Filled rounded rectangles in one colour. The barbell's bar sticks out past its plates, which a dumbbell never does, and the pair is the single dumbbell stacked twice like on a rack, so one and two differ only by count. Side by side and diagonal pairs were tried in a rendered prototype and read worse at row size.
 class _GlyphPainter extends CustomPainter {
   _GlyphPainter(this.equipment, this.color);
 

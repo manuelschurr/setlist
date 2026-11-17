@@ -99,7 +99,6 @@ class _PickerScreenState extends State<_PickerScreen> {
 
 typedef _Draft = ({String name, ExerciseKind kind, String? category, int weightStepGrams, Duration rest, Equipment equipment});
 
-/// Name, kind (the ten combinations), category, weight increment, equipment with a bar weight for a barbell, and rest. [save] writes the draft and may throw [DuplicateExerciseName], which keeps the dialog open with the error under the name.
 class _ExerciseDialog extends StatefulWidget {
   const _ExerciseDialog({required this.title, required this.action, required this.initial, required this.save});
 
@@ -124,8 +123,6 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
     }),
   );
   late ExerciseKind _kind = widget.initial.kind;
-
-  /// The dropdown's choice. A barbell's bar weight here is only what keeps the dropdown's items equal to it; the saved bar comes from [_bar].
   late Equipment _equipment = widget.initial.equipment;
   String? _nameError;
   String? _stepError;

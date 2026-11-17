@@ -12,7 +12,6 @@ import 'package:setlist/rest_alarm.dart';
 import 'package:setlist/store.dart';
 import 'package:setlist/workout_screen.dart';
 
-/// Renders the main screens to PNGs at the test phone's size, with real fonts, so a layout can be reviewed without a device. The renders run only when SETLIST_RENDER_DIR names an output folder; the check that text fits runs always.
 final class _SilentAlarm implements RestAlarm {
   @override
   void show(Rest? rest) {}

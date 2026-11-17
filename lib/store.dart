@@ -438,7 +438,7 @@ CREATE INDEX slot_by_exercise ON workout_slot (
 );
 ''';
 
-/// Adds `exercise.equipment` and `exercise.bar_g` by building the table again, for the reasons [_v2] gives. Copying `id` keeps every `workout_slot.exercise_id` pointing at the same exercise, which `_migrate`'s foreign key check proves. The UNIQUE indexes come back with the CREATE.
+/// Adds `exercise.equipment` and `exercise.bar_g` by building the table again, for the reasons [_v2] gives.
 const String _v3 = r'''
 CREATE TEMP TABLE exercise_v2 AS SELECT id, name, kind, category, weight_step_g, rest_s, import_key FROM exercise;
 
