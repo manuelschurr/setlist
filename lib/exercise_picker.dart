@@ -10,16 +10,16 @@ Future<Exercise?> pickExercise(BuildContext context, Store store, {Set<ExerciseI
   return Navigator.push<Exercise>(context, MaterialPageRoute(builder: (_) => _PickerScreen(store: store, inDay: inDay)));
 }
 
-/// Edits name, kind, category, increment and rest of [exercise] and saves them through [Store.updateExercise]. Returns the saved exercise, or null on Cancel. The caller dispatches [UpdateExercise] so the open day shows it.
+/// Edits name, kind, category, increment, rest and equipment of [exercise] and saves them through [Store.updateExercise]. Returns the saved exercise, or null on Cancel. The caller dispatches [UpdateExercise] so the open day shows it.
 Future<Exercise?> editExercise(BuildContext context, Store store, Exercise exercise) {
   return showDialog<Exercise>(
     context: context,
     builder: (_) => _ExerciseDialog(
       title: 'Edit exercise',
       action: 'Save',
-      initial: (name: exercise.name, kind: exercise.kind, category: exercise.category, weightStepGrams: exercise.weightStepGrams, rest: exercise.rest),
+      initial: (name: exercise.name, kind: exercise.kind, category: exercise.category, weightStepGrams: exercise.weightStepGrams, rest: exercise.rest, equipment: exercise.equipment),
       save: (d) {
-        final edited = Exercise(id: exercise.id, name: d.name, kind: d.kind, equipment: exercise.equipment, category: d.category, weightStepGrams: d.weightStepGrams, rest: d.rest);
+        final edited = Exercise(id: exercise.id, name: d.name, kind: d.kind, equipment: d.equipment, category: d.category, weightStepGrams: d.weightStepGrams, rest: d.rest);
         store.updateExercise(edited);
         return edited;
       },
@@ -59,8 +59,8 @@ class _PickerScreenState extends State<_PickerScreen> {
       builder: (_) => _ExerciseDialog(
         title: 'New exercise',
         action: 'Create',
-        initial: (name: _query.trim(), kind: ExerciseKind.weightReps, category: null, weightStepGrams: defaults.weightStepGrams, rest: defaults.rest),
-        save: (d) => widget.store.createExercise(name: d.name, kind: d.kind, category: d.category, weightStepGrams: d.weightStepGrams, rest: d.rest),
+        initial: (name: _query.trim(), kind: ExerciseKind.weightReps, category: null, weightStepGrams: defaults.weightStepGrams, rest: defaults.rest, equipment: Equipment.none),
+        save: (d) => widget.store.createExercise(name: d.name, kind: d.kind, category: d.category, weightStepGrams: d.weightStepGrams, rest: d.rest, equipment: d.equipment),
       ),
     );
     if (created != null && mounted) Navigator.pop(context, created);
@@ -96,9 +96,9 @@ class _PickerScreenState extends State<_PickerScreen> {
   }
 }
 
-typedef _Draft = ({String name, ExerciseKind kind, String? category, int weightStepGrams, Duration rest});
+typedef _Draft = ({String name, ExerciseKind kind, String? category, int weightStepGrams, Duration rest, Equipment equipment});
 
-/// Name, kind (the ten combinations), category, weight increment and rest. [save] writes the draft and may throw [DuplicateExerciseName], which keeps the dialog open with the error under the name.
+/// Name, kind (the ten combinations), category, weight increment, equipment with a bar weight for a barbell, and rest. [save] writes the draft and may throw [DuplicateExerciseName], which keeps the dialog open with the error under the name.
 class _ExerciseDialog extends StatefulWidget {
   const _ExerciseDialog({required this.title, required this.action, required this.initial, required this.save});
 
@@ -116,14 +116,24 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
   late final _category = TextEditingController(text: widget.initial.category ?? '');
   late final _step = TextEditingController(text: Field.weight.format(widget.initial.weightStepGrams));
   late final _rest = TextEditingController(text: Field.time.format(widget.initial.rest.inSeconds));
+  late final _bar = TextEditingController(
+    text: Field.weight.format(switch (widget.initial.equipment) {
+      Barbell(:final barGrams) => barGrams,
+      _ => Barbell.standardBarGrams,
+    }),
+  );
   late ExerciseKind _kind = widget.initial.kind;
+
+  /// The dropdown's choice. A barbell's bar weight here is only what keeps the dropdown's items equal to it; the saved bar comes from [_bar].
+  late Equipment _equipment = widget.initial.equipment;
   String? _nameError;
   String? _stepError;
+  String? _barError;
   String? _restError;
 
   @override
   void dispose() {
-    for (final c in [_name, _category, _step, _rest]) {
+    for (final c in [_name, _category, _step, _bar, _rest]) {
       c.dispose();
     }
     super.dispose();
@@ -131,17 +141,26 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
 
   void _submit() {
     final name = _name.text.trim();
-    final step = _kind.fields.contains(Field.weight) ? Field.weight.parse(_step.text) : widget.initial.weightStepGrams;
+    final hasWeight = _kind.fields.contains(Field.weight);
+    final step = hasWeight ? Field.weight.parse(_step.text) : widget.initial.weightStepGrams;
+    final bar = Field.weight.parse(_bar.text);
     final rest = Field.time.parse(_rest.text);
     setState(() {
       _nameError = name.isEmpty ? 'Give it a name' : null;
       _stepError = step == null || step <= 0 ? 'Type a step above 0, such as 2.5' : null;
+      _barError = hasWeight && _equipment is Barbell && (bar == null || bar <= 0) ? 'Type a bar weight above 0, such as 20' : null;
       _restError = rest == null ? 'Type m:ss such as 2:00' : null;
     });
-    if (_nameError != null || _stepError != null || _restError != null) return;
+    if (_nameError != null || _stepError != null || _barError != null || _restError != null) return;
     final category = _category.text.trim();
+    final equipment = !hasWeight
+        ? Equipment.none
+        : switch (_equipment) {
+            Barbell() => Barbell(bar!),
+            final other => other,
+          };
     try {
-      final saved = widget.save((name: name, kind: _kind, category: category.isEmpty ? null : category, weightStepGrams: step!, rest: Duration(seconds: rest!)));
+      final saved = widget.save((name: name, kind: _kind, category: category.isEmpty ? null : category, weightStepGrams: step!, rest: Duration(seconds: rest!), equipment: equipment));
       Navigator.pop(context, saved);
     } on DuplicateExerciseName {
       setState(() => _nameError = 'An exercise with this name exists');
@@ -170,6 +189,26 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
           if (_kind.fields.contains(Field.weight)) ...[
             const SizedBox(height: 12),
             TextField(controller: _step, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'Weight step', suffixText: 'kg', errorText: _stepError)),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<Equipment>(
+              initialValue: _equipment,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Equipment'),
+              items: [
+                for (final e in Equipment.choices(
+                  barGrams: switch (_equipment) {
+                    Barbell(:final barGrams) => barGrams,
+                    _ => Barbell.standardBarGrams,
+                  },
+                ))
+                  DropdownMenuItem(value: e, child: Text(e.label)),
+              ],
+              onChanged: (e) => setState(() => _equipment = e ?? _equipment),
+            ),
+            if (_equipment is Barbell) ...[
+              const SizedBox(height: 12),
+              TextField(controller: _bar, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'Bar weight', suffixText: 'kg', errorText: _barError)),
+            ],
           ],
           const SizedBox(height: 12),
           TextField(controller: _rest, keyboardType: TextInputType.datetime, decoration: InputDecoration(labelText: 'Rest', helperText: 'm:ss', errorText: _restError)),

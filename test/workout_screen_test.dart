@@ -296,6 +296,75 @@ void main() {
     expect(find.text('An exercise with this name exists'), findsOneWidget);
   });
 
+  Future<void> openEdit(WidgetTester tester, String name) async {
+    await tester.ensureVisible(find.byTooltip('More for $name'));
+    await tester.tap(find.byTooltip('More for $name'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit exercise'));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> chooseEquipment(WidgetTester tester, String label) async {
+    await tester.tap(find.byType(DropdownButtonFormField<Equipment>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(label).last);
+    await tester.pumpAndSettle();
+  }
+
+  Equipment storedEquipment(Exercise e) => store.exercises().singleWhere((x) => x.id == e.id).equipment;
+
+  testWidgets('creating an exercise offers equipment for a kind with a weight and stores the choice', (tester) async {
+    await openToday(tester);
+    await tester.tap(find.text('Add exercise'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Hammer curl');
+    await tester.pump();
+    await tester.tap(find.text('Create "Hammer curl"'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(DropdownButtonFormField<Equipment>, 'None'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Bar weight'), findsNothing);
+    await chooseEquipment(tester, 'Two dumbbells');
+    await tester.tap(find.widgetWithText(FilledButton, 'Create'));
+    await tester.pumpAndSettle();
+    expect(store.exercises().singleWhere((e) => e.name == 'Hammer curl').equipment, Equipment.dumbbellPair);
+  });
+
+  testWidgets('editing an exercise sets a barbell with its bar weight, and a later edit of only the name keeps it', (tester) async {
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 60, 5))]));
+    await openToday(tester);
+    await openEdit(tester, 'Squat');
+    await chooseEquipment(tester, 'Barbell');
+    final bar = find.widgetWithText(TextField, 'Bar weight');
+    expect(tester.widget<TextField>(bar).controller!.text, '20');
+    await tester.enterText(bar, '15');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(storedEquipment(squat), const Barbell(15000));
+
+    await openEdit(tester, 'Squat');
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Bar weight')).controller!.text, '15');
+    await tester.enterText(find.widgetWithText(TextField, 'Name'), 'Back squat');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(storedEquipment(squat), const Barbell(15000));
+    expect(store.loadDay(today).slots.single.exercise.equipment, const Barbell(15000));
+  });
+
+  testWidgets('a bar weight of 0 or not a number keeps the dialog open with the error', (tester) async {
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 60, 5))]));
+    await openToday(tester);
+    await openEdit(tester, 'Squat');
+    await chooseEquipment(tester, 'Barbell');
+    for (final typed in ['0', 'abc']) {
+      await tester.enterText(find.widgetWithText(TextField, 'Bar weight'), typed);
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(find.text('Type a bar weight above 0, such as 20'), findsOneWidget, reason: typed);
+      expect(find.text('Edit exercise'), findsOneWidget, reason: typed);
+    }
+    expect(storedEquipment(squat), Equipment.none);
+  });
+
   testWidgets('history returns to the home screen for today, and its Copy fills today there', (tester) async {
     store.saveDay(Workout(day: daysAgo(2), entries: [Slot(squat, sets(3, 100, 5, done: true))]));
     store.saveDay(Workout(day: today, entries: [Slot(bench, sets(2, 80, 8))]));
