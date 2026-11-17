@@ -191,6 +191,32 @@ void main() {
       store.updateExercise(edited);
       expect(store.exercises(), [edited]);
     });
+
+    test('an exercise created with a barbell loads with its bar, in the catalog and in a day', () {
+      final curl = store.createExercise(name: 'EZ-Bar Curl', kind: ExerciseKind.weightReps, equipment: const Barbell(7500));
+      expect(curl.equipment, const Barbell(7500));
+      expect(store.exercises().singleWhere((e) => e.id == curl.id).equipment, const Barbell(7500));
+      store.saveDay(Workout(day: d1, entries: [Slot(curl, [done(27500, 10)])]));
+      expect(store.loadDay(d1).slots.single.exercise, curl);
+      expect(squat.equipment, Equipment.none);
+    });
+
+    test('an edit changes the equipment and the bar, and a later edit of only the name keeps them', () {
+      Equipment stored() => store.exercises().single.equipment;
+      for (final equipment in [Equipment.dumbbellPair, Equipment.oneDumbbell, const Barbell(15000), Equipment.none, const Barbell(10000)]) {
+        store.updateExercise(Exercise(id: squat.id, name: 'Squat', kind: ExerciseKind.weightReps, equipment: equipment));
+        expect(stored(), equipment);
+      }
+      store.updateExercise(Exercise(id: squat.id, name: 'Back squat', kind: ExerciseKind.weightReps, equipment: store.exercises().single.equipment));
+      expect(stored(), const Barbell(10000));
+    });
+
+    test('a kind without a weight stores no equipment, so switching back to a weight shows none', () {
+      store.updateExercise(Exercise(id: squat.id, name: 'Squat', kind: ExerciseKind.reps, equipment: const Barbell(20000)));
+      final raw = sqlite3.open(path);
+      addTearDown(raw.close);
+      expect(raw.select('SELECT equipment, bar_g FROM exercise').single.values, ['none', null]);
+    });
   });
 
   group('import', () {
@@ -220,6 +246,15 @@ void main() {
       final plank = store.exercises().singleWhere((e) => e.name == 'Plank');
       expect((plank.weightStepGrams, plank.rest), (1000, const Duration(seconds: 60)));
       expect(store.exercises().singleWhere((e) => e.id == squat.id), squat);
+      expect(plank.equipment, Equipment.none);
+    });
+
+    test('importing again keeps the equipment the lifter set on a linked exercise', () {
+      store.importBatch(batch);
+      final barbell = Exercise(id: squat.id, name: 'Squat', kind: ExerciseKind.weightReps, equipment: const Barbell(15000));
+      store.updateExercise(barbell);
+      store.importBatch(batch);
+      expect(store.exercises().singleWhere((e) => e.id == squat.id).equipment, const Barbell(15000));
     });
 
     test('never overwrites or resurrects a day the lifter saved in Setlist', () {
@@ -364,6 +399,62 @@ PRAGMA user_version = 1;
       addTearDown(copy.close);
       expect(copy.userVersion, 1);
       expect([for (final row in copy.select('SELECT exercise_id FROM workout_slot ORDER BY position')) row['exercise_id']], [2, 1]);
+    });
+
+    test('a v2 file with data migrates every exercise to no equipment with its id, keeps a v2 copy, and ends with the schema a new file has', () {
+      final v2 = '$path.v2';
+      sqlite3.open(v2)
+        ..execute(File('test/schema_v2.sql').readAsStringSync())
+        ..execute('''
+INSERT INTO exercise (id, name, kind, category, weight_step_g, rest_s, import_key) VALUES (3, 'Squat', 'weightReps', 'Legs', 2500, 120, NULL), (7, 'Bench', 'weightReps', NULL, 1000, 90, 'fitnotes:12'), (12, 'Plank', 'time', NULL, 2500, 60, NULL);
+INSERT INTO workout (day, note) VALUES ('2026-11-09', 'push');
+INSERT INTO workout_slot (day, exercise_id, position, joined) VALUES ('2026-11-09', 12, 0, 0), ('2026-11-09', 7, 1, 0), ('2026-11-09', 3, 2, 1);
+INSERT INTO workout_set (day, exercise_id, set_index, weight_g, reps, seconds, done) VALUES ('2026-11-09', 12, 0, 0, 0, 60, 1), ('2026-11-09', 7, 0, 80000, 5, 0, 1), ('2026-11-09', 3, 0, 100000, 5, 0, 0);
+INSERT INTO app_day (day) VALUES ('2026-11-09');
+PRAGMA user_version = 2;
+''')
+        ..close();
+
+      final migrated = Store.open(v2);
+      addTearDown(migrated.close);
+      const squatV2 = Exercise(id: ExerciseId(3), name: 'Squat', kind: ExerciseKind.weightReps, equipment: Equipment.none, category: 'Legs');
+      const benchV2 = Exercise(id: ExerciseId(7), name: 'Bench', kind: ExerciseKind.weightReps, equipment: Equipment.none, weightStepGrams: 1000, rest: Duration(seconds: 90));
+      const plank = Exercise(id: ExerciseId(12), name: 'Plank', kind: ExerciseKind.time, equipment: Equipment.none, rest: Duration(seconds: 60));
+      expect(migrated.exercises().toSet(), {squatV2, benchV2, plank});
+      expect(
+        migrated.loadDay(d1),
+        Workout(day: d1, note: 'push', entries: [
+          Slot(plank, [const SetEntry(seconds: 60, status: Done())]),
+          Superset([Slot(benchV2, [const SetEntry(grams: 80000, reps: 5, status: Done())]), Slot(squatV2, [const SetEntry(grams: 100000, reps: 5)])]),
+        ]),
+      );
+      final relinked = migrated.importBatch(const ImportBatch(source: 'fitnotes', exercises: [ImportedExercise(key: '12', name: 'Bench press', kind: ExerciseKind.weightReps)], days: []));
+      expect((relinked.exercisesCreated, relinked.exercisesLinked), (0, 1));
+
+      List<String> schema(String file) {
+        final db = sqlite3.open(file, mode: OpenMode.readOnly);
+        try {
+          return [for (final row in db.select('SELECT type, name, sql FROM sqlite_master ORDER BY rowid')) '$row', 'user_version ${db.userVersion}'];
+        } finally {
+          db.close();
+        }
+      }
+
+      expect(schema(v2), schema(path));
+      final copy = sqlite3.open('$v2.v2.bak', mode: OpenMode.readOnly);
+      addTearDown(copy.close);
+      expect(copy.userVersion, 2);
+      expect([for (final row in copy.select('SELECT id FROM exercise ORDER BY id')) row['id']], [3, 7, 12]);
+    });
+
+    test('a bar weight is stored exactly for a barbell, and only above 0', () {
+      final raw = sqlite3.open(path);
+      addTearDown(raw.close);
+      for (final update in ["UPDATE exercise SET equipment = 'barbell'", "UPDATE exercise SET equipment = 'dumbbellPair', bar_g = 20000", "UPDATE exercise SET equipment = 'barbell', bar_g = 0", "UPDATE exercise SET bar_g = 20000"]) {
+        expect(() => raw.execute(update), throwsA(isA<SqliteException>()), reason: update);
+      }
+      raw.execute("UPDATE exercise SET equipment = 'barbell', bar_g = 15000");
+      expect(store.exercises().single.equipment, const Barbell(15000));
     });
 
     test('a slot cannot be stored joined at position 0, or with any flag but 0 and 1', () {

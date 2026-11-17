@@ -98,16 +98,20 @@ final class Store {
   }
 
   /// Creates an exercise. A null [weightStepGrams] or [rest] takes the value from [loadDefaults]. Throws [DuplicateExerciseName] when another exercise has [name], ignoring case.
-  Exercise createExercise({required String name, required ExerciseKind kind, String? category, int? weightStepGrams, Duration? rest}) {
+  Exercise createExercise({required String name, required ExerciseKind kind, String? category, int? weightStepGrams, Duration? rest, Equipment equipment = Equipment.none}) {
     final defaults = loadDefaults();
     final step = weightStepGrams ?? defaults.weightStepGrams;
     final restTime = rest ?? defaults.rest;
-    final id = _writeExercise(name, () => _sql('INSERT INTO exercise (name, kind, category, weight_step_g, rest_s) VALUES (?, ?, ?, ?, ?) RETURNING id').select([name, kind.name, category, step, restTime.inSeconds]).single['id'] as int);
-    return Exercise(id: ExerciseId(id), name: name, kind: kind, equipment: Equipment.none, category: category, weightStepGrams: step, rest: restTime);
+    final (equipmentName, barGrams) = _equipmentColumns(equipment);
+    final id = _writeExercise(name, () => _sql('INSERT INTO exercise (name, kind, category, weight_step_g, rest_s, equipment, bar_g) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id').select([name, kind.name, category, step, restTime.inSeconds, equipmentName, barGrams]).single['id'] as int);
+    return Exercise(id: ExerciseId(id), name: name, kind: kind, equipment: equipment, category: category, weightStepGrams: step, rest: restTime);
   }
 
-  /// Saves name, kind, category, increment and rest for [exercise.id]. Throws [DuplicateExerciseName] like [createExercise]. Dispatch [UpdateExercise] afterwards so the open day shows the change.
-  void updateExercise(Exercise exercise) => _writeExercise(exercise.name, () => _sql('UPDATE exercise SET name = ?, kind = ?, category = ?, weight_step_g = ?, rest_s = ? WHERE id = ?').execute([exercise.name, exercise.kind.name, exercise.category, exercise.weightStepGrams, exercise.rest.inSeconds, exercise.id.value]));
+  /// Saves name, kind, category, increment, rest and equipment for [exercise.id]. Throws [DuplicateExerciseName] like [createExercise]. Dispatch [UpdateExercise] afterwards so the open day shows the change.
+  void updateExercise(Exercise exercise) {
+    final (equipmentName, barGrams) = _equipmentColumns(exercise.equipment);
+    _writeExercise(exercise.name, () => _sql('UPDATE exercise SET name = ?, kind = ?, category = ?, weight_step_g = ?, rest_s = ?, equipment = ?, bar_g = ? WHERE id = ?').execute([exercise.name, exercise.kind.name, exercise.category, exercise.weightStepGrams, exercise.rest.inSeconds, equipmentName, barGrams, exercise.id.value]));
+  }
 
   T _writeExercise<T>(String name, T Function() write) {
     try {
@@ -120,7 +124,7 @@ final class Store {
 
   /// Writes an importer's output. Safe to run any number of times. Each run converges on the same rows, and a failure at any point leaves the database as it was before the run. Throws [ArgumentError] for a day that appears twice, an entry with no slots, a slot with no sets, or a slot whose exercise key is not in [ImportBatch.exercises], and [StoreWriteFailed] when SQLite refuses a row.
   ///
-  /// The batch's defaults, when given, replace the stored ones first. Ownership decides who writes a day. The importer writes a day only if the app has never saved it (no app_day row); those days it replaces wholesale, so a newer backup refreshes them. Days the app has saved are skipped and listed in [ImportReport.skippedDays]. Exercises are matched by import key, then by name ignoring case, then created; a matched exercise keeps the lifter's own name, increment and rest. A created exercise whose name is taken by one with another import key gets the source appended, as in `Squat (fitnotes)`.
+  /// The batch's defaults, when given, replace the stored ones first. Ownership decides who writes a day. The importer writes a day only if the app has never saved it (no app_day row); those days it replaces wholesale, so a newer backup refreshes them. Days the app has saved are skipped and listed in [ImportReport.skippedDays]. Exercises are matched by import key, then by name ignoring case, then created; a matched exercise keeps the lifter's own name, increment, rest, equipment and bar weight. No source tells the equipment, so a created exercise has none. A created exercise whose name is taken by one with another import key gets the source appended, as in `Squat (fitnotes)`.
   ImportReport importBatch(ImportBatch batch) {
     try {
       return _inTransaction(_db, () {
@@ -270,7 +274,7 @@ const _setlistTables = {'exercise', 'workout', 'workout_slot', 'workout_set', 'a
 const _weightStepKey = 'default_weight_step_g';
 const _restKey = 'default_rest_s';
 
-const _exerciseColumns = 'e.id, e.name, e.kind, e.category, e.weight_step_g, e.rest_s';
+const _exerciseColumns = 'e.id, e.name, e.kind, e.category, e.weight_step_g, e.rest_s, e.equipment, e.bar_g';
 const _setColumns = 's.weight_g, s.reps, s.metres, s.seconds, s.warmup, s.done, s.logged_at, s.note AS set_note';
 
 const _selectDays = 'SELECT w.day, w.note AS day_note, sl.joined, $_exerciseColumns, $_setColumns FROM workout w LEFT JOIN workout_slot sl ON sl.day = w.day LEFT JOIN exercise e ON e.id = sl.exercise_id LEFT JOIN workout_set s ON s.day = sl.day AND s.exercise_id = sl.exercise_id';
@@ -298,7 +302,12 @@ List<Entry> _entries(Iterable<(Exercise, bool, List<SetEntry>)> slots) {
   return [for (final group in groups) group.length == 1 ? group.single : Superset(group)];
 }
 
-Exercise _exercise(Row row) => Exercise(id: ExerciseId(row['id'] as int), name: row['name'] as String, kind: ExerciseKind.values.byName(row['kind'] as String), equipment: Equipment.none, category: row['category'] as String?, weightStepGrams: row['weight_step_g'] as int, rest: Duration(seconds: row['rest_s'] as int));
+Exercise _exercise(Row row) => Exercise(id: ExerciseId(row['id'] as int), name: row['name'] as String, kind: ExerciseKind.values.byName(row['kind'] as String), equipment: Equipment.named(row['equipment'] as String, barGrams: row['bar_g'] as int?), category: row['category'] as String?, weightStepGrams: row['weight_step_g'] as int, rest: Duration(seconds: row['rest_s'] as int));
+
+(String, int?) _equipmentColumns(Equipment equipment) => switch (equipment) {
+  Barbell(:final barGrams) => (equipment.name, barGrams),
+  NoEquipment() || DumbbellPair() || OneDumbbell() => (equipment.name, null),
+};
 
 SetEntry _set(Row row) {
   final loggedAt = row['logged_at'] as int?;
@@ -331,7 +340,7 @@ void _configure(Database db) => db.execute('PRAGMA foreign_keys = ON; PRAGMA jou
 /// Append-only. Entry i moves the schema from user_version i to i + 1. A shipped entry is never edited; a change is a new entry. docs/schema.sql is generated from a database these build, and test/store_test.dart fails when the two differ.
 ///
 /// Comments that document the schema sit inside each statement, because SQLite keeps a statement's text in sqlite_master and drops anything between statements.
-const List<String> _migrations = [_v1, _v2];
+const List<String> _migrations = [_v1, _v2, _v3];
 
 const String _v1 = r'''
 CREATE TABLE exercise (
@@ -427,6 +436,34 @@ CREATE INDEX slot_by_exercise ON workout_slot (
   -- Serves the foreign key from exercise, so changing or deleting an exercise does not scan every slot.
   exercise_id
 );
+''';
+
+/// Adds `exercise.equipment` and `exercise.bar_g` by building the table again, for the reasons [_v2] gives. Copying `id` keeps every `workout_slot.exercise_id` pointing at the same exercise, which `_migrate`'s foreign key check proves. The UNIQUE indexes come back with the CREATE.
+const String _v3 = r'''
+CREATE TEMP TABLE exercise_v2 AS SELECT id, name, kind, category, weight_step_g, rest_s, import_key FROM exercise;
+
+DROP TABLE exercise;
+
+CREATE TABLE exercise (
+  id            INTEGER PRIMARY KEY,
+  name          TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+  -- ExerciseKind.name in lib/day.dart. No CHECK, so a new kind needs no table rebuild; the store parses this column and rejects unknown values.
+  kind          TEXT    NOT NULL,
+  category      TEXT,
+  -- No defaults here: the store always writes them, from the caller or from the setting table.
+  weight_step_g INTEGER NOT NULL CHECK (weight_step_g > 0),
+  rest_s        INTEGER NOT NULL CHECK (rest_s >= 0),
+  -- Stable id in an import source, such as 'fitnotes:42'. NULL for exercises created in the app. Lets a second import find the same exercise after a rename.
+  import_key    TEXT    UNIQUE,
+  -- Equipment.name in lib/day.dart: what the logged total is lifted with, for the marker and the panel's breakdown. No CHECK on the names, like kind. The default is what an import writes, because no source tells the equipment.
+  equipment     TEXT    NOT NULL DEFAULT 'none',
+  -- Grams of the bar, set exactly when equipment is 'barbell'. Per exercise, because an EZ bar is lighter than a squat bar.
+  bar_g         INTEGER CHECK (bar_g > 0) CHECK ((bar_g IS NOT NULL) = (equipment = 'barbell'))
+) STRICT;
+
+INSERT INTO exercise (id, name, kind, category, weight_step_g, rest_s, import_key) SELECT id, name, kind, category, weight_step_g, rest_s, import_key FROM exercise_v2;
+
+DROP TABLE exercise_v2;
 ''';
 
 /// Brings [db] to `_migrations.length`. Each step is one transaction that includes the user_version bump, and user_version lives in the database header, so it rolls back with the step. A crash mid-migration therefore leaves the old version, and the next launch reruns that step from the start.
