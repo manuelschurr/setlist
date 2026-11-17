@@ -206,8 +206,8 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
                     value: e,
                     child: Row(
                       children: [
-                        EquipmentMark(e, height: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        Flexible(child: Text(e.label)),
+                        Expanded(child: Text(e.label)),
+                        EquipmentMark(e, height: 16, color: Theme.of(context).colorScheme.onSurfaceVariant, gap: 0),
                       ],
                     ),
                   ),
