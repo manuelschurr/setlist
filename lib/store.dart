@@ -103,7 +103,7 @@ final class Store {
     final step = weightStepGrams ?? defaults.weightStepGrams;
     final restTime = rest ?? defaults.rest;
     final id = _writeExercise(name, () => _sql('INSERT INTO exercise (name, kind, category, weight_step_g, rest_s) VALUES (?, ?, ?, ?, ?) RETURNING id').select([name, kind.name, category, step, restTime.inSeconds]).single['id'] as int);
-    return Exercise(id: ExerciseId(id), name: name, kind: kind, category: category, weightStepGrams: step, rest: restTime);
+    return Exercise(id: ExerciseId(id), name: name, kind: kind, equipment: Equipment.none, category: category, weightStepGrams: step, rest: restTime);
   }
 
   /// Saves name, kind, category, increment and rest for [exercise.id]. Throws [DuplicateExerciseName] like [createExercise]. Dispatch [UpdateExercise] afterwards so the open day shows the change.
@@ -298,7 +298,7 @@ List<Entry> _entries(Iterable<(Exercise, bool, List<SetEntry>)> slots) {
   return [for (final group in groups) group.length == 1 ? group.single : Superset(group)];
 }
 
-Exercise _exercise(Row row) => Exercise(id: ExerciseId(row['id'] as int), name: row['name'] as String, kind: ExerciseKind.values.byName(row['kind'] as String), category: row['category'] as String?, weightStepGrams: row['weight_step_g'] as int, rest: Duration(seconds: row['rest_s'] as int));
+Exercise _exercise(Row row) => Exercise(id: ExerciseId(row['id'] as int), name: row['name'] as String, kind: ExerciseKind.values.byName(row['kind'] as String), equipment: Equipment.none, category: row['category'] as String?, weightStepGrams: row['weight_step_g'] as int, rest: Duration(seconds: row['rest_s'] as int));
 
 SetEntry _set(Row row) {
   final loggedAt = row['logged_at'] as int?;

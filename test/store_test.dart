@@ -96,7 +96,7 @@ void main() {
     test('a failed save throws StoreWriteFailed and keeps the rows from before', () {
       final w = Workout(day: d1, entries: [Slot(squat, [done(100000, 5)])]);
       store.saveDay(w);
-      const ghost = Exercise(id: ExerciseId(999), name: 'Ghost', kind: ExerciseKind.reps);
+      const ghost = Exercise(id: ExerciseId(999), name: 'Ghost', kind: ExerciseKind.reps, equipment: Equipment.none);
       expect(() => store.saveDay(Workout(day: d1, entries: [Slot(ghost, [const SetEntry(reps: 5)])])), throwsA(isA<StoreWriteFailed>()));
       expect(() => store.saveDay(Workout(day: d1, entries: [Slot(squat, [const SetEntry(reps: -1)])])), throwsA(isA<StoreWriteFailed>()));
       expect(store.loadDay(d1), w);
@@ -106,7 +106,7 @@ void main() {
 
     test('a saved day shows its exercise as it is now', () {
       store.saveDay(Workout(day: d1, entries: [Slot(squat, [done(100000, 5)])]));
-      final renamed = Exercise(id: squat.id, name: 'Back squat', kind: ExerciseKind.weightReps, category: 'Legs', weightStepGrams: 1000, rest: const Duration(minutes: 3));
+      final renamed = Exercise(id: squat.id, name: 'Back squat', kind: ExerciseKind.weightReps, equipment: Equipment.none, category: 'Legs', weightStepGrams: 1000, rest: const Duration(minutes: 3));
       store.updateExercise(renamed);
       expect(store.loadDay(d1).slots.single.exercise, renamed);
     });
@@ -170,7 +170,7 @@ void main() {
       memory.createExercise(name: 'Squat', kind: ExerciseKind.weightReps);
       final front = memory.createExercise(name: 'Front squat', kind: ExerciseKind.weightReps);
       expect(() => memory.createExercise(name: 'SQUAT', kind: ExerciseKind.reps), throwsA(isA<DuplicateExerciseName>()));
-      expect(() => memory.updateExercise(Exercise(id: front.id, name: 'squat', kind: front.kind)), throwsA(isA<DuplicateExerciseName>()));
+      expect(() => memory.updateExercise(Exercise(id: front.id, name: 'squat', kind: front.kind, equipment: Equipment.none)), throwsA(isA<DuplicateExerciseName>()));
       expect([for (final e in memory.exercises()) e.name]..sort(), ['Front squat', 'Squat']);
     });
 
@@ -187,7 +187,7 @@ void main() {
     });
 
     test('an edit saves every field', () {
-      final edited = Exercise(id: squat.id, name: 'Box squat', kind: ExerciseKind.repsTime, category: 'Legs', weightStepGrams: 500, rest: const Duration(seconds: 45));
+      final edited = Exercise(id: squat.id, name: 'Box squat', kind: ExerciseKind.repsTime, equipment: Equipment.none, category: 'Legs', weightStepGrams: 500, rest: const Duration(seconds: 45));
       store.updateExercise(edited);
       expect(store.exercises(), [edited]);
     });
@@ -247,7 +247,7 @@ void main() {
 
     test('links an exercise by its import key after a rename, and by name only when no key holds it', () {
       store.importBatch(batch);
-      store.updateExercise(Exercise(id: squat.id, name: 'Back squat', kind: ExerciseKind.weightReps));
+      store.updateExercise(Exercise(id: squat.id, name: 'Back squat', kind: ExerciseKind.weightReps, equipment: Equipment.none));
       final again = store.importBatch(batch);
       expect(again.exercisesCreated, 0);
       expect(store.loadDay(d1).slots.single.exercise.name, 'Back squat');
@@ -343,8 +343,8 @@ PRAGMA user_version = 1;
 
       final migrated = Store.open(v1);
       addTearDown(migrated.close);
-      const bench = Exercise(id: ExerciseId(2), name: 'Bench', kind: ExerciseKind.weightReps, rest: Duration(seconds: 90));
-      const squatV1 = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps);
+      const bench = Exercise(id: ExerciseId(2), name: 'Bench', kind: ExerciseKind.weightReps, equipment: Equipment.none, rest: Duration(seconds: 90));
+      const squatV1 = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps, equipment: Equipment.none);
       expect(migrated.loadDay(d1), Workout(day: d1, note: 'legs', entries: [Slot(bench, [const SetEntry(grams: 80000, reps: 5, status: Done())]), Slot(squatV1, [const SetEntry(grams: 100000, reps: 5), const SetEntry(grams: 100000, reps: 5)])]));
       final paired = Workout(day: d2, entries: [Superset([Slot(squatV1, [const SetEntry(grams: 100000, reps: 5)]), Slot(bench, [const SetEntry(grams: 80000, reps: 5)])])]);
       migrated.saveDay(paired);

@@ -1,11 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:setlist/day.dart';
 
-const squat = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps);
-const bench = Exercise(id: ExerciseId(2), name: 'Bench press', kind: ExerciseKind.weightReps);
-const row = Exercise(id: ExerciseId(3), name: 'Row', kind: ExerciseKind.weightReps);
-const press = Exercise(id: ExerciseId(5), name: 'Overhead press', kind: ExerciseKind.weightReps);
-const dip = Exercise(id: ExerciseId(6), name: 'Dip', kind: ExerciseKind.reps);
+const squat = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps, equipment: Equipment.none);
+const bench = Exercise(id: ExerciseId(2), name: 'Bench press', kind: ExerciseKind.weightReps, equipment: Equipment.none);
+const row = Exercise(id: ExerciseId(3), name: 'Row', kind: ExerciseKind.weightReps, equipment: Equipment.none);
+const press = Exercise(id: ExerciseId(5), name: 'Overhead press', kind: ExerciseKind.weightReps, equipment: Equipment.none);
+const dip = Exercise(id: ExerciseId(6), name: 'Dip', kind: ExerciseKind.reps, equipment: Equipment.none);
 final today = Day.parse('2026-11-12');
 final at = DateTime(2026, 11, 12, 18, 30);
 
@@ -287,7 +287,7 @@ void main() {
 
     test('editing an exercise refreshes the copy its slot holds', () {
       final s = open([Slot(squat, [kg(100, 5)])]);
-      const renamed = Exercise(id: ExerciseId(1), name: 'Back squat', kind: ExerciseKind.weightReps, weightStepGrams: 1000);
+      const renamed = Exercise(id: ExerciseId(1), name: 'Back squat', kind: ExerciseKind.weightReps, equipment: Equipment.none, weightStepGrams: 1000);
       expect(reduce(s, const UpdateExercise(renamed)).workout.slots.single.exercise, renamed);
       expect(identical(reduce(s, const UpdateExercise(squat)), s), isTrue);
     });
@@ -369,7 +369,7 @@ void main() {
       final s = open([Slot(squat, [kg(100, 5)]), Superset([Slot(bench, [kg(80, 5), kg(80, 5)]), Slot(row, [kg(60, 8)])])]);
       final cascaded = reduce(s, SetField(ref(bench, 0), Field.weight, 82500));
       expect(weights(cascaded, bench), [82.5, 82.5]);
-      const renamed = Exercise(id: ExerciseId(3), name: 'Barbell row', kind: ExerciseKind.weightReps);
+      const renamed = Exercise(id: ExerciseId(3), name: 'Barbell row', kind: ExerciseKind.weightReps, equipment: Equipment.none);
       for (final next in [
         cascaded,
         reduce(s, SetWarmup(ref(row, 0), warmup: true)),
@@ -474,8 +474,8 @@ void main() {
   });
 
   group('rest in a superset', () {
-    const quickRow = Exercise(id: ExerciseId(3), name: 'Row', kind: ExerciseKind.weightReps, rest: Duration(seconds: 60));
-    const slowPress = Exercise(id: ExerciseId(5), name: 'Overhead press', kind: ExerciseKind.weightReps, rest: Duration(minutes: 3));
+    const quickRow = Exercise(id: ExerciseId(3), name: 'Row', kind: ExerciseKind.weightReps, equipment: Equipment.none, rest: Duration(seconds: 60));
+    const slowPress = Exercise(id: ExerciseId(5), name: 'Overhead press', kind: ExerciseKind.weightReps, equipment: Equipment.none, rest: Duration(minutes: 3));
 
     test('no countdown while a later exercise of the round still has a planned set', () {
       var s = open([Superset([Slot(bench, [kg(80, 5), kg(80, 5)]), Slot(quickRow, [kg(60, 8), kg(60, 8)])])]);
@@ -676,7 +676,7 @@ void main() {
     });
 
     test('a stepper tap moves weight by the exercise increment and stops reps, distance and time at zero', () {
-      const dumbbell = Exercise(id: ExerciseId(9), name: 'Curl', kind: ExerciseKind.weightReps, weightStepGrams: 1000);
+      const dumbbell = Exercise(id: ExerciseId(9), name: 'Curl', kind: ExerciseKind.weightReps, equipment: Equipment.none, weightStepGrams: 1000);
       expect(Field.weight.stepped(dumbbell, 12000, up: true), 13000);
       expect(Field.weight.stepped(dumbbell, 0, up: false), -1000);
       expect(Field.reps.stepped(dumbbell, 5, up: false), 4);
@@ -694,7 +694,7 @@ void main() {
   });
 
   group('rest', () {
-    const short = Exercise(id: ExerciseId(4), name: 'Curl', kind: ExerciseKind.weightReps, rest: Duration(seconds: 60));
+    const short = Exercise(id: ExerciseId(4), name: 'Curl', kind: ExerciseKind.weightReps, equipment: Equipment.none, rest: Duration(seconds: 60));
 
     test('counts down from the latest log by that exercise rest, then ends', () {
       var s = open([Slot(squat, [kg(100, 5), kg(100, 5)]), Slot(short, [kg(10, 10), kg(10, 10)])]);
@@ -760,5 +760,87 @@ void main() {
     expect(() => Slot(squat, []), throwsArgumentError);
     expect(() => Superset([Slot(squat, [kg(100, 5)])]), throwsArgumentError);
     expect(() => Superset([]), throwsArgumentError);
+  });
+
+  group('equipment', () {
+    test('a barbell splits the total into the bar and what goes on each side', () {
+      const bar = Barbell(20000);
+      expect(bar.breakdown(60000), '20 kg a side · 20 kg bar');
+      expect(bar.breakdown(62500), '21.25 kg a side · 20 kg bar');
+      expect(bar.breakdown(102500), '41.25 kg a side · 20 kg bar');
+      expect(bar.breakdown(20000), 'just the 20 kg bar');
+      expect(bar.breakdown(15000), 'less than the 20 kg bar');
+      expect(const Barbell(7500).breakdown(27500), '10 kg a side · 7.5 kg bar');
+    });
+
+    test('odd gram halves show the half the formatter would round the exact half to', () {
+      expect(const Barbell(20000).breakdown(40015), '10.01 kg a side · 20 kg bar');
+      expect(const Barbell(20000).breakdown(40009), '10 kg a side · 20 kg bar');
+      expect(Equipment.dumbbellPair.breakdown(12345), '6.17 kg each');
+      expect(Equipment.dumbbellPair.breakdown(12350), '6.18 kg each');
+      for (var grams = 1; grams <= 50000; grams++) {
+        final exactHalfRoundedTo10g = (grams + 10) ~/ 20 * 10;
+        expect(Equipment.dumbbellPair.breakdown(grams), '${Field.weight.format(exactHalfRoundedTo10g)} kg each', reason: '$grams g');
+      }
+    });
+
+    test('a pair shows each dumbbell', () {
+      expect(Equipment.dumbbellPair.breakdown(12000), '6 kg each');
+      expect(Equipment.dumbbellPair.breakdown(5000), '2.5 kg each');
+    });
+
+    test('a total of 0 or less keeps the line of a pair or barbell but leaves it blank', () {
+      for (final grams in [0, -5000]) {
+        expect(Equipment.dumbbellPair.breakdown(grams), '', reason: '$grams g');
+        expect(const Barbell(20000).breakdown(grams), '', reason: '$grams g');
+      }
+    });
+
+    test('no equipment and one dumbbell never have a line, whatever the total', () {
+      for (final grams in [-5000, 0, 6000, 100000]) {
+        expect(Equipment.none.breakdown(grams), isNull, reason: '$grams g');
+        expect(Equipment.oneDumbbell.breakdown(grams), isNull, reason: '$grams g');
+      }
+    });
+
+    test('the choices hold every kind of equipment once', () {
+      String kindOf(Equipment e) => switch (e) {
+        NoEquipment() => 'none',
+        Barbell() => 'barbell',
+        DumbbellPair() => 'pair',
+        OneDumbbell() => 'one',
+      };
+      final choices = Equipment.choices(barGrams: 20000);
+      expect(choices.map(kindOf).toSet(), {'none', 'barbell', 'pair', 'one'});
+      expect(choices.map((e) => e.name).toSet(), hasLength(4));
+      expect(choices.map((e) => e.label).toSet(), hasLength(4));
+    });
+
+    test('a stored name parses back, and a bar only on a barbell above 0', () {
+      for (final e in Equipment.choices(barGrams: 15000)) {
+        expect(Equipment.named(e.name, barGrams: e is Barbell ? e.barGrams : null), e);
+      }
+      expect(() => Equipment.named('kettlebell'), throwsFormatException);
+      expect(() => Equipment.named('barbell'), throwsFormatException);
+      expect(() => Equipment.named('barbell', barGrams: 0), throwsFormatException);
+      expect(() => Equipment.named('dumbbellPair', barGrams: 20000), throwsFormatException);
+    });
+
+    test('a kind without a weight has no equipment, whatever was set', () {
+      const plank = Exercise(id: ExerciseId(9), name: 'Plank', kind: ExerciseKind.time, equipment: Barbell(20000));
+      expect(plank.equipment, Equipment.none);
+      expect(plank, const Exercise(id: ExerciseId(9), name: 'Plank', kind: ExerciseKind.time, equipment: Equipment.none));
+    });
+
+    test('an edit of only the equipment or the bar refreshes the slot, and the same equipment changes nothing', () {
+      final s = open([Slot(squat, [kg(100, 5)])]);
+      const pair = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps, equipment: Equipment.dumbbellPair);
+      expect(reduce(s, const UpdateExercise(pair)).workout.slots.single.exercise.equipment, Equipment.dumbbellPair);
+      const barbell = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps, equipment: Barbell(20000));
+      final loaded = open([Slot(barbell, [kg(100, 5)])]);
+      const lighter = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps, equipment: Barbell(15000));
+      expect(reduce(loaded, const UpdateExercise(lighter)).workout.slots.single.exercise.equipment, const Barbell(15000));
+      expect(identical(reduce(loaded, const UpdateExercise(barbell)), loaded), isTrue);
+    });
   });
 }

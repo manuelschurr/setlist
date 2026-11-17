@@ -19,7 +19,7 @@ Future<Exercise?> editExercise(BuildContext context, Store store, Exercise exerc
       action: 'Save',
       initial: (name: exercise.name, kind: exercise.kind, category: exercise.category, weightStepGrams: exercise.weightStepGrams, rest: exercise.rest),
       save: (d) {
-        final edited = Exercise(id: exercise.id, name: d.name, kind: d.kind, category: d.category, weightStepGrams: d.weightStepGrams, rest: d.rest);
+        final edited = Exercise(id: exercise.id, name: d.name, kind: d.kind, equipment: exercise.equipment, category: d.category, weightStepGrams: d.weightStepGrams, rest: d.rest);
         store.updateExercise(edited);
         return edited;
       },
