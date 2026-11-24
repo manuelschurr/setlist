@@ -74,3 +74,9 @@ CREATE TABLE exercise (
   -- Grams of an adjustable dumbbell's empty handle, which the plates go on. Only for 'dumbbellPair' and 'oneDumbbell', and NULL for fixed dumbbells. Per exercise, because a home set and a gym's differ.
   handle_g      INTEGER CHECK (handle_g > 0) CHECK (handle_g IS NULL OR equipment IN ('dumbbellPair', 'oneDumbbell'))
 ) STRICT;
+
+CREATE TABLE plate (
+  -- The plates the lifter owns, for the panel's line of which plates go on each end of an adjustable dumbbell. A weight not owned has no row. The import never writes it.
+  weight_g INTEGER PRIMARY KEY CHECK (weight_g > 0),
+  pieces   INTEGER NOT NULL CHECK (pieces > 0)
+) STRICT, WITHOUT ROWID;

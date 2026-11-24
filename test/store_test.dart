@@ -16,7 +16,7 @@ Map<String, List<String>> dump(String path) {
   final db = sqlite3.open(path);
   try {
     return {
-      for (final table in ['exercise', 'workout', 'workout_slot', 'workout_set', 'app_day', 'setting']) table: [for (final row in db.select('SELECT * FROM $table')) '$row']..sort(),
+      for (final table in ['exercise', 'workout', 'workout_slot', 'workout_set', 'app_day', 'setting', 'plate']) table: [for (final row in db.select('SELECT * FROM $table')) '$row']..sort(),
     };
   } finally {
     db.close();
@@ -226,6 +226,31 @@ void main() {
       final raw = sqlite3.open(path);
       addTearDown(raw.close);
       expect(raw.select('SELECT equipment, bar_g, handle_g FROM exercise').single.values, ['none', null, null]);
+    });
+  });
+
+  group('plates', () {
+    test('a new file owns no plates', () {
+      expect(store.loadPlates(), Plates.none);
+    });
+
+    test('saved plates load back, survive a reopen, and a later save replaces them all', () {
+      final home = Plates({500: 4, 1000: 4, 1250: 4, 15000: 2});
+      store.savePlates(home);
+      expect(store.loadPlates(), home);
+      store.close();
+      store = Store.open(path);
+      expect(store.loadPlates(), home);
+      store.savePlates(Plates({2500: 8}));
+      expect(store.loadPlates(), Plates({2500: 8}));
+      store.savePlates(Plates.none);
+      expect(store.loadPlates(), Plates.none);
+    });
+
+    test('an import leaves the plates alone', () {
+      store.savePlates(Plates({1250: 4}));
+      store.importBatch(const ImportBatch(source: 'fitnotes', exercises: [ImportedExercise(key: '7', name: 'Curl', kind: ExerciseKind.weightReps)], days: []));
+      expect(store.loadPlates(), Plates({1250: 4}));
     });
   });
 
@@ -479,6 +504,7 @@ PRAGMA user_version = 3;
       const row = Exercise(id: ExerciseId(9), name: 'Row', kind: ExerciseKind.weightReps, equipment: Equipment.oneDumbbell, weightStepGrams: 1000, rest: Duration(seconds: 90));
       const plank = Exercise(id: ExerciseId(12), name: 'Plank', kind: ExerciseKind.time, equipment: Equipment.none, rest: Duration(seconds: 60));
       expect(migrated.exercises().toSet(), {squatV3, curl, row, plank});
+      expect(migrated.loadPlates(), Plates.none);
       expect(
         migrated.loadDay(d1),
         Workout(day: d1, note: 'pull', entries: [
@@ -503,6 +529,14 @@ PRAGMA user_version = 3;
       addTearDown(copy.close);
       expect(copy.userVersion, 3);
       expect([for (final row in copy.select('SELECT id FROM exercise ORDER BY id')) row['id']], [3, 7, 9, 12]);
+    });
+
+    test('a plate is stored only with a weight and pieces above 0', () {
+      final raw = sqlite3.open(path);
+      addTearDown(raw.close);
+      for (final insert in ['INSERT INTO plate (weight_g, pieces) VALUES (0, 2)', 'INSERT INTO plate (weight_g, pieces) VALUES (500, 0)', 'INSERT INTO plate (weight_g, pieces) VALUES (500, -2)']) {
+        expect(() => raw.execute(insert), throwsA(isA<SqliteException>()), reason: insert);
+      }
     });
 
     test('a handle weight is stored only for a dumbbell, and only above 0', () {

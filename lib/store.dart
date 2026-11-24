@@ -81,6 +81,17 @@ final class Store {
     return [for (final row in rows) _exercise(row)];
   }
 
+  /// The plates the lifter owns, [Plates.none] until they are entered.
+  Plates loadPlates() => Plates({for (final row in _sql('SELECT weight_g, pieces FROM plate').select()) row['weight_g'] as int: row['pieces'] as int});
+
+  /// Replaces the plates the lifter owns with [plates].
+  void savePlates(Plates plates) => _inTransaction(_db, () {
+    _sql('DELETE FROM plate').execute();
+    for (final MapEntry(key: grams, value: pieces) in plates.pieces.entries) {
+      _sql('INSERT INTO plate (weight_g, pieces) VALUES (?, ?)').execute([grams, pieces]);
+    }
+  });
+
   ExerciseDefaults loadDefaults() {
     final values = {for (final row in _sql('SELECT key, value FROM setting').select()) row['key'] as String: row['value']};
     return (
@@ -467,7 +478,7 @@ INSERT INTO exercise (id, name, kind, category, weight_step_g, rest_s, import_ke
 DROP TABLE exercise_v2;
 ''';
 
-/// Adds `exercise.handle_g` by building the table again, for the reasons [_v2] gives.
+/// Adds `exercise.handle_g` by building the table again, for the reasons [_v2] gives, and the `plate` table.
 const String _v4 = r'''
 CREATE TEMP TABLE exercise_v3 AS SELECT id, name, kind, category, weight_step_g, rest_s, import_key, equipment, bar_g FROM exercise;
 
@@ -495,6 +506,12 @@ CREATE TABLE exercise (
 INSERT INTO exercise (id, name, kind, category, weight_step_g, rest_s, import_key, equipment, bar_g) SELECT id, name, kind, category, weight_step_g, rest_s, import_key, equipment, bar_g FROM exercise_v3;
 
 DROP TABLE exercise_v3;
+
+CREATE TABLE plate (
+  -- The plates the lifter owns, for the panel's line of which plates go on each end of an adjustable dumbbell. A weight not owned has no row. The import never writes it.
+  weight_g INTEGER PRIMARY KEY CHECK (weight_g > 0),
+  pieces   INTEGER NOT NULL CHECK (pieces > 0)
+) STRICT, WITHOUT ROWID;
 ''';
 
 /// Brings [db] to `_migrations.length`. Each step is one transaction that includes the user_version bump, and user_version lives in the database header, so it rolls back with the step. A crash mid-migration therefore leaves the old version, and the next launch reruns that step from the start.
