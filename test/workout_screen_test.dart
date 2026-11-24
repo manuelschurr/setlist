@@ -365,11 +365,72 @@ void main() {
     expect(storedEquipment(squat), Equipment.none);
   });
 
+  testWidgets('editing gives dumbbells a handle that splits the panel line, switching to one dumbbell keeps it, and clearing it makes them fixed', (tester) async {
+    store.saveDay(Workout(day: today, entries: [Slot(bench, sets(1, 14, 10))]));
+    await openToday(tester);
+    await openEdit(tester, 'Bench press');
+    expect(find.widgetWithText(TextField, 'Handle weight (optional)'), findsNothing);
+    await chooseEquipment(tester, 'Two dumbbells');
+    final handle = find.widgetWithText(TextField, 'Handle weight (optional)');
+    expect(tester.widget<TextField>(handle).controller!.text, '');
+    await tester.enterText(handle, '2.5');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(storedEquipment(bench), const DumbbellPair(handleGrams: 2500));
+    expect(inPanel(find.text('7 kg each (4.5 + 2.5 kg)')), findsOneWidget);
+
+    await openEdit(tester, 'Bench press');
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Handle weight (optional)')).controller!.text, '2.5');
+    await chooseEquipment(tester, 'One dumbbell');
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Handle weight (optional)')).controller!.text, '2.5');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(storedEquipment(bench), const OneDumbbell(handleGrams: 2500));
+    expect(inPanel(find.text('11.5 kg + 2.5 kg handle')), findsOneWidget);
+
+    await openEdit(tester, 'Bench press');
+    await tester.enterText(find.widgetWithText(TextField, 'Handle weight (optional)'), '');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(storedEquipment(bench), Equipment.oneDumbbell);
+    expect(inPanel(find.textContaining('handle')), findsNothing);
+  });
+
+  testWidgets('a handle weight of 0 or not a number keeps the dialog open with the error', (tester) async {
+    store.saveDay(Workout(day: today, entries: [Slot(bench, sets(1, 14, 10))]));
+    await openToday(tester);
+    await openEdit(tester, 'Bench press');
+    await chooseEquipment(tester, 'Two dumbbells');
+    for (final typed in ['0', 'abc']) {
+      await tester.enterText(find.widgetWithText(TextField, 'Handle weight (optional)'), typed);
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(find.text('Type a handle weight above 0, or leave it empty'), findsOneWidget, reason: typed);
+      expect(find.text('Edit exercise'), findsOneWidget, reason: typed);
+    }
+    expect(storedEquipment(bench), Equipment.none);
+  });
+
   Exercise withEquipment(Exercise e, Equipment equipment) {
     final changed = Exercise(id: e.id, name: e.name, kind: e.kind, equipment: equipment, category: e.category, weightStepGrams: e.weightStepGrams, rest: e.rest);
     store.updateExercise(changed);
     return changed;
   }
+
+  testWidgets('one adjustable dumbbell keeps its line at 0 kg, so the button rows stay level', (tester) async {
+    row = withEquipment(row, const OneDumbbell(handleGrams: 2500));
+    store.saveDay(Workout(day: today, entries: [Slot(row, [kg(7, 10), kg(0, 10)])]));
+    await openToday(tester);
+    Rect rect(String tooltip) => tester.getRect(inPanel(find.byTooltip(tooltip)));
+    expect(inPanel(find.text('4.5 kg + 2.5 kg handle')), findsOneWidget);
+    final panelAt7 = tester.getSize(panel);
+    expect(rect('Decrease weight').top, rect('Decrease reps').top);
+
+    await tester.tap(find.text('0 kg × 10'));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(panel), panelAt7);
+    expect(rect('Decrease weight').top, rect('Decrease reps').top);
+  });
 
   testWidgets('a barbell marks its rows and splits the total under the weight in the panel', (tester) async {
     final semantics = tester.ensureSemantics();

@@ -65,6 +65,24 @@ void main() {
     expect(tester.renderObject<RenderParagraph>(find.descendant(of: caption, matching: find.byType(RichText))).didExceedMaxLines, isFalse);
   });
 
+  testWidgets('the longest usual adjustable dumbbell caption fits its stepper on the test phone, in real fonts', (tester) async {
+    await tester.runAsync(_loadFonts);
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.8125;
+    addTearDown(tester.view.reset);
+    final store = Store.inMemory();
+    addTearDown(store.close);
+    const pair = DumbbellPair(handleGrams: 2500);
+    final curl = store.createExercise(name: 'Hammer Curl', kind: ExerciseKind.weightReps, equipment: pair);
+    // Plates of 0.5 kg and up on a 2.5 kg handle make every dumbbell a multiple of 0.5 kg, so a pair line never needs more than one decimal on each side.
+    store.saveDay(Workout(day: today, entries: [Slot(curl, [const SetEntry(grams: 47000, reps: 8)])]));
+    await tester.pumpWidget(MaterialApp(theme: setlistTheme(Brightness.light), home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today)));
+    await tester.pumpAndSettle();
+    final caption = find.text(pair.breakdown(47000));
+    expect(caption, findsOneWidget);
+    expect(tester.renderObject<RenderParagraph>(find.descendant(of: caption, matching: find.byType(RichText))).didExceedMaxLines, isFalse);
+  });
+
   testWidgets('render the workout flow', (tester) async {
     await tester.runAsync(_loadFonts);
     tester.view.physicalSize = const Size(1080, 2400);
