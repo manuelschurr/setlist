@@ -796,7 +796,39 @@ void main() {
       }
     });
 
-    test('no equipment and one dumbbell never have a line, whatever the total', () {
+    test('an adjustable pair splits each dumbbell into its plates and the handle', () {
+      const pair = DumbbellPair(handleGrams: 2500);
+      expect(pair.breakdown(14000), '7 kg each (4.5 + 2.5 kg)');
+      expect(pair.breakdown(47000), '23.5 kg each (21 + 2.5 kg)');
+      expect(pair.breakdown(14250), '7.13 kg each (4.63 + 2.5 kg)');
+      expect(pair.breakdown(5000), 'just the 2.5 kg handles');
+      expect(pair.breakdown(4000), 'less than the 2.5 kg handles');
+      expect(const DumbbellPair(handleGrams: 2000).breakdown(12000), '6 kg each (4 + 2 kg)');
+    });
+
+    test('one adjustable dumbbell splits into its plates and the handle', () {
+      const one = OneDumbbell(handleGrams: 2500);
+      expect(one.breakdown(7000), '4.5 kg + 2.5 kg handle');
+      expect(one.breakdown(2500), 'just the 2.5 kg handle');
+      expect(one.breakdown(2000), 'less than the 2.5 kg handle');
+    });
+
+    test('a total of 0 or less keeps the line of an adjustable dumbbell but leaves it blank', () {
+      for (final grams in [0, -5000]) {
+        expect(const DumbbellPair(handleGrams: 2500).breakdown(grams), '', reason: '$grams g');
+        expect(const OneDumbbell(handleGrams: 2500).breakdown(grams), '', reason: '$grams g');
+      }
+    });
+
+    test('the handle is part of the equipment, and a pair and one dumbbell on the same handle differ', () {
+      expect(const DumbbellPair(handleGrams: 2500), const DumbbellPair(handleGrams: 2500));
+      expect(const DumbbellPair(handleGrams: 2500), isNot(Equipment.dumbbellPair));
+      expect(const DumbbellPair(handleGrams: 2500), isNot(const DumbbellPair(handleGrams: 2000)));
+      expect(const DumbbellPair(handleGrams: 2500), isNot(const OneDumbbell(handleGrams: 2500)));
+      expect(Equipment.dumbbellPair, isNot(Equipment.oneDumbbell));
+    });
+
+    test('no equipment and one fixed dumbbell never have a line, whatever the total', () {
       for (final grams in [-5000, 0, 6000, 100000]) {
         expect(Equipment.none.breakdown(grams), isNull, reason: '$grams g');
         expect(Equipment.oneDumbbell.breakdown(grams), isNull, reason: '$grams g');
@@ -816,14 +848,18 @@ void main() {
       expect(choices.map((e) => e.label).toSet(), hasLength(4));
     });
 
-    test('a stored name parses back, and a bar only on a barbell above 0', () {
-      for (final e in Equipment.choices(barGrams: 15000)) {
-        expect(Equipment.named(e.name, barGrams: e is Barbell ? e.barGrams : null), e);
+    test('a stored name parses back, a bar only on a barbell and a handle only on a dumbbell, each above 0', () {
+      for (final e in [...Equipment.choices(barGrams: 15000), ...Equipment.choices(barGrams: 15000, handleGrams: 2500)]) {
+        expect(Equipment.named(e.name, barGrams: e is Barbell ? e.barGrams : null, handleGrams: e is Dumbbell ? e.handleGrams : null), e);
       }
+      expect(Equipment.named('oneDumbbell', handleGrams: 2500), const OneDumbbell(handleGrams: 2500));
       expect(() => Equipment.named('kettlebell'), throwsFormatException);
       expect(() => Equipment.named('barbell'), throwsFormatException);
       expect(() => Equipment.named('barbell', barGrams: 0), throwsFormatException);
       expect(() => Equipment.named('dumbbellPair', barGrams: 20000), throwsFormatException);
+      expect(() => Equipment.named('dumbbellPair', handleGrams: 0), throwsFormatException);
+      expect(() => Equipment.named('barbell', barGrams: 20000, handleGrams: 2500), throwsFormatException);
+      expect(() => Equipment.named('none', handleGrams: 2500), throwsFormatException);
     });
 
     test('a kind without a weight has no equipment, whatever was set', () {
@@ -832,7 +868,7 @@ void main() {
       expect(plank, const Exercise(id: ExerciseId(9), name: 'Plank', kind: ExerciseKind.time, equipment: Equipment.none));
     });
 
-    test('an edit of only the equipment or the bar refreshes the slot, and the same equipment changes nothing', () {
+    test('an edit of only the equipment, the bar or the handle refreshes the slot, and the same equipment changes nothing', () {
       final s = open([Slot(squat, [kg(100, 5)])]);
       const pair = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps, equipment: Equipment.dumbbellPair);
       expect(reduce(s, const UpdateExercise(pair)).workout.slots.single.exercise.equipment, Equipment.dumbbellPair);
@@ -841,6 +877,8 @@ void main() {
       const lighter = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps, equipment: Barbell(15000));
       expect(reduce(loaded, const UpdateExercise(lighter)).workout.slots.single.exercise.equipment, const Barbell(15000));
       expect(identical(reduce(loaded, const UpdateExercise(barbell)), loaded), isTrue);
+      const adjustable = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps, equipment: DumbbellPair(handleGrams: 2500));
+      expect(reduce(reduce(s, const UpdateExercise(pair)), const UpdateExercise(adjustable)).workout.slots.single.exercise.equipment, const DumbbellPair(handleGrams: 2500));
     });
   });
 }

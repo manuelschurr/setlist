@@ -169,21 +169,22 @@ final class SetEntry {
   int get hashCode => Object.hash(grams, reps, metres, seconds, warmup, note, status);
 }
 
-/// What the logged weight is lifted with. The logged weight is always the total load, so equipment never changes a set, e1RM, volume, the cascade or the step; it only explains how the total splits, for the marker and the panel's breakdown line. A bar weight exists only on [Barbell], so a bar on a dumbbell exercise cannot be built.
+/// What the logged weight is lifted with. The logged weight is always the total load, so equipment never changes a set, e1RM, volume, the cascade or the step; it only explains how the total splits, for the marker and the panel's breakdown line. A bar weight exists only on [Barbell] and a handle weight only on a [Dumbbell], so neither can be built on the wrong equipment.
 sealed class Equipment {
   const Equipment();
 
   static const none = NoEquipment._();
-  static const dumbbellPair = DumbbellPair._();
-  static const oneDumbbell = OneDumbbell._();
+  static const dumbbellPair = DumbbellPair();
+  static const oneDumbbell = OneDumbbell();
 
   /// Every equipment value in the dialog's order.
-  static List<Equipment> choices({required int barGrams}) => [none, Barbell(barGrams), dumbbellPair, oneDumbbell];
+  static List<Equipment> choices({required int barGrams, int? handleGrams}) => [none, Barbell(barGrams), DumbbellPair(handleGrams: handleGrams), OneDumbbell(handleGrams: handleGrams)];
 
-  /// Parses a stored [name] back. Throws [FormatException] unless [barGrams] is given exactly for a barbell and is above 0.
-  factory Equipment.named(String name, {int? barGrams}) {
-    final match = barGrams != null && barGrams <= 0 ? null : choices(barGrams: barGrams ?? Barbell.standardBarGrams).where((e) => e.name == name).firstOrNull;
-    if (match == null || (match is Barbell) != (barGrams != null)) throw FormatException('not a stored equipment', '$name/$barGrams');
+  /// Parses a stored [name] back. Throws [FormatException] unless [barGrams] is given exactly for a barbell, [handleGrams] at most for a dumbbell, and each is above 0.
+  factory Equipment.named(String name, {int? barGrams, int? handleGrams}) {
+    final valid = (barGrams == null || barGrams > 0) && (handleGrams == null || handleGrams > 0);
+    final match = !valid ? null : choices(barGrams: barGrams ?? Barbell.standardBarGrams, handleGrams: handleGrams).where((e) => e.name == name).firstOrNull;
+    if (match == null || (match is Barbell) != (barGrams != null) || (handleGrams != null && match is! Dumbbell)) throw FormatException('not a stored equipment', '$name/$barGrams/$handleGrams');
     return match;
   }
 
@@ -240,9 +241,30 @@ final class Barbell extends Equipment {
   int get hashCode => barGrams.hashCode;
 }
 
+/// Fixed dumbbells, or adjustable ones whose empty handle weighs [handleGrams], per exercise, because a home set and a gym's differ.
+sealed class Dumbbell extends Equipment {
+  const Dumbbell({this.handleGrams}) : assert(handleGrams == null || handleGrams > 0);
+
+  final int? handleGrams;
+
+  @override
+  bool operator ==(Object other) => other.runtimeType == runtimeType && other is Dumbbell && other.handleGrams == handleGrams;
+
+  @override
+  int get hashCode => Object.hash(runtimeType, handleGrams);
+}
+
+/// The line for one dumbbell of [grams] on a [handle]: [loaded] words its plates and the handle, and [handles] names the handle the way the line says it, one or two.
+String _onHandle(int grams, int handle, String handles, String Function(String plates, String handle) loaded) {
+  final h = Field.weight.format(handle);
+  if (grams == handle) return 'just the $h kg $handles';
+  if (grams < handle) return 'less than the $h kg $handles';
+  return loaded(Field.weight.format(grams - handle), h);
+}
+
 /// Two dumbbells of the same weight, logged as their sum: hammer curls at 12 kg are two 6 kg dumbbells.
-final class DumbbellPair extends Equipment {
-  const DumbbellPair._();
+final class DumbbellPair extends Dumbbell {
+  const DumbbellPair({super.handleGrams});
 
   @override
   String get name => 'dumbbellPair';
@@ -251,12 +273,19 @@ final class DumbbellPair extends Equipment {
   String get label => 'Two dumbbells';
 
   @override
-  String breakdown(int grams) => grams <= 0 ? '' : '${Field.weight.format(_half(grams))} kg each';
+  String breakdown(int grams) {
+    if (grams <= 0) return '';
+    final each = _half(grams);
+    final perDumbbell = '${Field.weight.format(each)} kg each';
+    final handle = handleGrams;
+    // The handle goes unnamed: '7 kg each (4.5 + 2.5 kg handle)' is wider than the stepper on the test phone.
+    return handle == null ? perDumbbell : _onHandle(each, handle, 'handles', (plates, h) => '$perDumbbell ($plates + $h kg)');
+  }
 }
 
 /// One dumbbell, logged as its own weight.
-final class OneDumbbell extends Equipment {
-  const OneDumbbell._();
+final class OneDumbbell extends Dumbbell {
+  const OneDumbbell({super.handleGrams});
 
   @override
   String get name => 'oneDumbbell';
@@ -265,7 +294,12 @@ final class OneDumbbell extends Equipment {
   String get label => 'One dumbbell';
 
   @override
-  String? breakdown(int grams) => null;
+  String? breakdown(int grams) {
+    final handle = handleGrams;
+    if (handle == null) return null;
+    if (grams <= 0) return '';
+    return _onHandle(grams, handle, 'handle', (plates, h) => '$plates kg + $h kg handle');
+  }
 }
 
 int _half(int grams) => grams ~/ 2;
