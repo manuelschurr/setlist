@@ -1,0 +1,74 @@
+-- The Setlist schema at user_version 3, as the 0.5 build shipped it. test/store_test.dart builds a v3 file from it to test the migration, so it never changes.
+
+CREATE TABLE workout (
+  -- One row per non-empty day, keyed by 'YYYY-MM-DD'. A day with no exercises and no note has no row.
+  day  TEXT PRIMARY KEY CHECK (day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  note TEXT NOT NULL DEFAULT ''
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE workout_set (
+  -- One set. Clustered by day, so loading or replacing a day reads or deletes one contiguous key range. Units: grams, metres, seconds, and logged_at in unix milliseconds.
+  day         TEXT    NOT NULL,
+  exercise_id INTEGER NOT NULL,
+  set_index   INTEGER NOT NULL CHECK (set_index >= 0),
+  weight_g    INTEGER NOT NULL DEFAULT 0,
+  reps        INTEGER NOT NULL DEFAULT 0 CHECK (reps >= 0),
+  metres      INTEGER NOT NULL DEFAULT 0 CHECK (metres >= 0),
+  seconds     INTEGER NOT NULL DEFAULT 0 CHECK (seconds >= 0),
+  warmup      INTEGER NOT NULL DEFAULT 0 CHECK (warmup IN (0, 1)),
+  done        INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1)),
+  -- NULL for planned sets, and for done sets imported without a time.
+  logged_at   INTEGER CHECK (logged_at IS NULL OR done = 1),
+  note        TEXT    NOT NULL DEFAULT '',
+  PRIMARY KEY (day, exercise_id, set_index),
+  FOREIGN KEY (day, exercise_id) REFERENCES workout_slot (day, exercise_id)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX set_done_by_exercise ON workout_set (
+  -- Previous-session lookup and the picker's recent-first order: MAX(day) for one exercise, then that day's done sets in order. Partial, so planned sets copied ahead never count as a session.
+  exercise_id, day, set_index
+) WHERE done = 1;
+
+CREATE TABLE app_day (
+  -- Days the app has saved at least once, including days it later emptied and deleted. The importer never writes these days, so a re-import cannot overwrite or resurrect what the lifter changed in Setlist.
+  day TEXT PRIMARY KEY
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE setting (
+  -- Global defaults for new exercises: default_weight_step_g in grams and default_rest_s in seconds. The FitNotes import writes the owner's values here.
+  key   TEXT PRIMARY KEY,
+  value ANY  NOT NULL
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE workout_slot (
+  -- One exercise in a day. The primary key is the "an exercise at most once per day" rule.
+  day         TEXT    NOT NULL REFERENCES workout (day),
+  exercise_id INTEGER NOT NULL REFERENCES exercise (id),
+  position    INTEGER NOT NULL CHECK (position >= 0),
+  -- 1 when this slot is in the same superset as the slot before it in position order, so a superset is a slot with 0 and the run of 1s after it, and a superset of one or one whose exercises are apart cannot be stored. The first slot of a day, at position 0, is never joined.
+  joined      INTEGER NOT NULL DEFAULT 0 CHECK (joined IN (0, 1)) CHECK (joined = 0 OR position > 0),
+  PRIMARY KEY (day, exercise_id),
+  UNIQUE (day, position)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX slot_by_exercise ON workout_slot (
+  -- Serves the foreign key from exercise, so changing or deleting an exercise does not scan every slot.
+  exercise_id
+);
+
+CREATE TABLE exercise (
+  id            INTEGER PRIMARY KEY,
+  name          TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+  -- ExerciseKind.name in lib/day.dart. No CHECK, so a new kind needs no table rebuild; the store parses this column and rejects unknown values.
+  kind          TEXT    NOT NULL,
+  category      TEXT,
+  -- No defaults here: the store always writes them, from the caller or from the setting table.
+  weight_step_g INTEGER NOT NULL CHECK (weight_step_g > 0),
+  rest_s        INTEGER NOT NULL CHECK (rest_s >= 0),
+  -- Stable id in an import source, such as 'fitnotes:42'. NULL for exercises created in the app. Lets a second import find the same exercise after a rename.
+  import_key    TEXT    UNIQUE,
+  -- Equipment.name in lib/day.dart: what the logged total is lifted with, for the marker and the panel's breakdown. No CHECK on the names, like kind. The default is what an import writes, because no source tells the equipment.
+  equipment     TEXT    NOT NULL DEFAULT 'none',
+  -- Grams of the bar, set exactly when equipment is 'barbell'. Per exercise, because an EZ bar is lighter than a squat bar.
+  bar_g         INTEGER CHECK (bar_g > 0) CHECK ((bar_g IS NOT NULL) = (equipment = 'barbell'))
+) STRICT;
