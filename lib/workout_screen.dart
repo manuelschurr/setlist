@@ -9,6 +9,7 @@ import 'package:flutter/rendering.dart';
 import 'day.dart';
 import 'drive_backup.dart';
 import 'equipment_mark.dart';
+import 'plates_dialog.dart';
 import 'exercise_history_screen.dart';
 import 'exercise_picker.dart';
 import 'history_screen.dart';
@@ -84,6 +85,13 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
   }
 
   late List<Workout> _recent = _loadRecent();
+
+  late Plates _plates = widget.store.loadPlates();
+
+  Future<void> _editPlates() async {
+    final plates = await editPlates(context, widget.store);
+    if (plates != null && mounted) setState(() => _plates = plates);
+  }
 
   bool get _isHome => widget.day == widget.home.day;
 
@@ -348,6 +356,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
             itemBuilder: (_) => [
               PopupMenuItem(value: _editNote, child: const Text('Workout note')),
               PopupMenuItem(value: _copyPast, child: const Text('Copy a past workout')),
+              PopupMenuItem(value: _editPlates, child: const Text('Your plates')),
             ],
           ),
         ],
@@ -451,7 +460,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with WidgetsBindingObserv
           ),
         ],
       ),
-      bottomNavigationBar: workout.slots.isEmpty ? null : _Panel(state: _state, onCommand: _dispatch),
+      bottomNavigationBar: workout.slots.isEmpty ? null : _Panel(state: _state, plates: _plates, onCommand: _dispatch),
     );
   }
 }
@@ -745,7 +754,9 @@ class _SetRow extends StatelessWidget {
 }
 
 class _Panel extends StatelessWidget {
-  const _Panel({required this.state, required this.onCommand});
+  const _Panel({required this.state, required this.plates, required this.onCommand});
+
+  final Plates plates;
 
   final DayState state;
   final ValueChanged<Command> onCommand;
@@ -769,6 +780,7 @@ class _Panel extends StatelessWidget {
       final equipment = slot.exercise.equipment;
       final caption = equipment.breakdown(set.grams);
       final blankToLevelButtons = caption == null ? null : '';
+      final plateLine = equipment is Dumbbell ? equipment.plateLine(set.grams, plates) : null;
       content = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -809,6 +821,11 @@ class _Panel extends StatelessWidget {
               ],
             ],
           ),
+          // Full width, because five plates on an end are wider than the weight stepper. Kept, blank, at or below the handle, so stepping never moves the button.
+          if (plateLine != null) ...[
+            const SizedBox(height: 8),
+            Text(plateLine, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
+          ],
           const SizedBox(height: 12),
           FilledButton(
             style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56), textStyle: theme.textTheme.titleMedium),

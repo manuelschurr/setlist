@@ -83,6 +83,26 @@ void main() {
     expect(tester.renderObject<RenderParagraph>(find.descendant(of: caption, matching: find.byType(RichText))).didExceedMaxLines, isFalse);
   });
 
+  testWidgets('the longest plate line for a pair up to 60 kg fits the panel on the test phone, in real fonts', (tester) async {
+    await tester.runAsync(_loadFonts);
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.8125;
+    addTearDown(tester.view.reset);
+    final store = Store.inMemory();
+    addTearDown(store.close);
+    final plates = Plates({for (final grams in [500, 1000, 1250, 2000, 2500, 5000, 10000, 15000]) grams: 4});
+    store.savePlates(plates);
+    const pair = DumbbellPair(handleGrams: 2500);
+    final longest = [for (var grams = 5000; grams <= 60000; grams += 500) grams].reduce((a, b) => pair.plateLine(b, plates)!.length > pair.plateLine(a, plates)!.length ? b : a);
+    final curl = store.createExercise(name: 'Hammer Curl', kind: ExerciseKind.weightReps, equipment: pair);
+    store.saveDay(Workout(day: today, entries: [Slot(curl, [SetEntry(grams: longest, reps: 8)])]));
+    await tester.pumpWidget(MaterialApp(theme: setlistTheme(Brightness.light), home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today)));
+    await tester.pumpAndSettle();
+    final line = find.text(pair.plateLine(longest, plates)!);
+    expect(line, findsOneWidget);
+    expect(tester.renderObject<RenderParagraph>(find.descendant(of: line, matching: find.byType(RichText))).didExceedMaxLines, isFalse, reason: pair.plateLine(longest, plates));
+  });
+
   testWidgets('render the workout flow', (tester) async {
     await tester.runAsync(_loadFonts);
     tester.view.physicalSize = const Size(1080, 2400);
@@ -92,7 +112,8 @@ void main() {
     final store = Store.inMemory();
     addTearDown(store.close);
     final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, category: 'Legs', equipment: const Barbell(20000));
-    final bench = store.createExercise(name: 'Incline Dumbbell Bench Press', kind: ExerciseKind.weightReps, category: 'Chest', equipment: Equipment.dumbbellPair);
+    final bench = store.createExercise(name: 'Incline Dumbbell Bench Press', kind: ExerciseKind.weightReps, category: 'Chest', equipment: const DumbbellPair(handleGrams: 2500));
+    store.savePlates(Plates({for (final grams in [500, 1000, 1250, 2000, 2500, 5000]) grams: 4}));
     final raise = store.createExercise(name: 'Lateral Dumbbell Raise', kind: ExerciseKind.weightReps, category: 'Shoulders', equipment: Equipment.oneDumbbell);
     final plank = store.createExercise(name: 'Plank', kind: ExerciseKind.time, category: 'Core');
     store.saveDay(Workout(day: daysAgo(3), entries: [

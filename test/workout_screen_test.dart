@@ -432,6 +432,85 @@ void main() {
     expect(rect('Decrease weight').top, rect('Decrease reps').top);
   });
 
+  Future<void> openPlates(WidgetTester tester) async {
+    await tester.tap(find.byTooltip('Show menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Your plates'));
+    await tester.pumpAndSettle();
+  }
+
+  Finder plateCount(num kg) => find.byKey(ValueKey('plates ${(kg * 1000).round()}'));
+
+  testWidgets('entering plates adds the plates for each end under an adjustable pair, and the dialog shows them again', (tester) async {
+    bench = withEquipment(bench, const DumbbellPair(handleGrams: 2500));
+    store.saveDay(Workout(day: today, entries: [Slot(bench, sets(1, 14, 10))]));
+    await openToday(tester);
+    expect(inPanel(find.text('7 kg each (4.5 + 2.5 kg)')), findsOneWidget);
+    expect(inPanel(find.textContaining('on each end')), findsNothing);
+
+    await openPlates(tester);
+    expect(plateCount(15), findsOneWidget, reason: 'usual sizes are offered before any is owned');
+    await tester.enterText(plateCount(1.25), '4');
+    await tester.enterText(plateCount(1), '4');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(store.loadPlates(), Plates({1250: 4, 1000: 4}));
+    expect(inPanel(find.text('7 kg each (4.5 + 2.5 kg)')), findsOneWidget);
+    expect(inPanel(find.text('1.25 + 1 kg on each end')), findsOneWidget);
+
+    await tester.tap(inPanel(find.byTooltip('Increase weight')));
+    await tester.pump();
+    expect(inPanel(find.textContaining("your plates can't make")), findsOneWidget);
+
+    await openPlates(tester);
+    expect(tester.widget<TextField>(plateCount(1.25)).controller!.text, '4');
+    expect(tester.widget<TextField>(plateCount(2)).controller!.text, '');
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(store.loadPlates(), Plates({1250: 4, 1000: 4}));
+  });
+
+  testWidgets('a count that is not a whole number keeps the plates dialog open, and another size joins the list', (tester) async {
+    store.saveDay(Workout(day: today, entries: [Slot(bench, sets(1, 14, 10))]));
+    await openToday(tester);
+    await openPlates(tester);
+    await tester.enterText(plateCount(2.5), '2.5');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Whole number'), findsOneWidget);
+    expect(find.text('Your plates'), findsOneWidget);
+
+    await tester.enterText(plateCount(2.5), '');
+    await tester.enterText(find.widgetWithText(TextField, 'Another size'), '0.75');
+    await tester.ensureVisible(find.byTooltip('Add size'));
+    await tester.tap(find.byTooltip('Add size'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, '0.75'), findsNothing, reason: 'the size field empties once added');
+    await tester.enterText(plateCount(0.75), '2');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(store.loadPlates(), Plates({750: 2}));
+
+    await openPlates(tester);
+    expect(tester.widget<TextField>(plateCount(0.75)).controller!.text, '2');
+  });
+
+  testWidgets('with plates, an adjustable pair keeps both lines at 0 kg and the button rows stay level', (tester) async {
+    store.savePlates(Plates({1250: 4, 1000: 4}));
+    bench = withEquipment(bench, const DumbbellPair(handleGrams: 2500));
+    store.saveDay(Workout(day: today, entries: [Slot(bench, [kg(14, 10), kg(0, 10)])]));
+    await openToday(tester);
+    Rect rect(String tooltip) => tester.getRect(inPanel(find.byTooltip(tooltip)));
+    expect(inPanel(find.text('1.25 + 1 kg on each end')), findsOneWidget);
+    final panelAt14 = tester.getSize(panel);
+    expect(rect('Decrease weight').top, rect('Decrease reps').top);
+
+    await tester.tap(find.text('0 kg × 10'));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(panel), panelAt14);
+    expect(rect('Decrease weight').top, rect('Decrease reps').top);
+  });
+
   testWidgets('a barbell marks its rows and splits the total under the weight in the panel', (tester) async {
     final semantics = tester.ensureSemantics();
     squat = withEquipment(squat, const Barbell(20000));
