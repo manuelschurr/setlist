@@ -241,6 +241,9 @@ final class Barbell extends Equipment {
   int get hashCode => barGrams.hashCode;
 }
 
+/// The panel's line under the weight of an adjustable dumbbell once the lifter has counted their plates: [each] as on a fixed dumbbell, then [plates] for each end, heaviest first, or null when the lifter's plates can't make it.
+typedef Loading = ({String? each, List<int>? plates});
+
 /// Fixed dumbbells, or adjustable ones whose empty handle weighs [handleGrams], per exercise, because a home set and a gym's differ.
 sealed class Dumbbell extends Equipment {
   const Dumbbell({this.handleGrams}) : assert(handleGrams == null || handleGrams > 0);
@@ -253,15 +256,16 @@ sealed class Dumbbell extends Equipment {
   /// The grams of one dumbbell for the logged total [grams].
   int _oneOf(int grams);
 
-  /// The panel's plate line: which of [plates] go on each end for the logged total [grams], the fewest and then the heaviest, as in `1.25 + 1 kg on each end`. Null exactly when there is no handle or no plates, whatever [grams] is, so the panel reserves the line by those two alone. An empty string for a total of 0 or less and at or below the handle, where the first line already says so.
-  String? plateLine(int grams, Plates plates) {
+  /// What one dumbbell weighs, worded for the panel, such as `6.5 kg each` for a pair. Null for one dumbbell, whose total is its own weight.
+  String? _each(int grams);
+
+  /// What goes on each end for the logged total [grams], from the lifter's [plates]: the fewest plates that make it, and among equally few the heavier. Null without a handle or plates, at or below the handle and for a total of 0 or less, where [breakdown] says it all.
+  Loading? loading(int grams, Plates plates) {
     final handle = handleGrams;
-    if (handle == null || plates.isEmpty) return null;
+    if (handle == null || plates.isEmpty || grams <= 0) return null;
     final loaded = _oneOf(grams) - handle;
-    if (grams <= 0 || loaded <= 0) return '';
-    final perEnd = loaded.isOdd ? null : plates.forEachEnd(loaded ~/ 2, ends: _ends);
-    if (perEnd == null) return "your plates can't make ${Field.weight.format(loaded ~/ 2)} kg on each end";
-    return '${perEnd.map(Field.weight.format).join(' + ')} kg on each end';
+    if (loaded <= 0) return null;
+    return (each: _each(grams), plates: loaded.isOdd ? null : plates.forEachEnd(loaded ~/ 2, ends: _ends));
   }
 
   @override
@@ -290,6 +294,9 @@ final class DumbbellPair extends Dumbbell {
   int _oneOf(int grams) => _half(grams);
 
   @override
+  String _each(int grams) => '${Field.weight.format(_half(grams))} kg each';
+
+  @override
   String get name => 'dumbbellPair';
 
   @override
@@ -298,11 +305,8 @@ final class DumbbellPair extends Dumbbell {
   @override
   String breakdown(int grams) {
     if (grams <= 0) return '';
-    final each = _half(grams);
-    final perDumbbell = '${Field.weight.format(each)} kg each';
     final handle = handleGrams;
-    // The handle goes unnamed: '7 kg each (4.5 + 2.5 kg handle)' is wider than the stepper on the test phone.
-    return handle == null ? perDumbbell : _onHandle(each, handle, 'handles', (plates, h) => '$perDumbbell ($plates + $h kg)');
+    return handle == null ? _each(grams) : _onHandle(_half(grams), handle, 'handles', (plates, h) => '${_each(grams)} ($plates + $h kg)');
   }
 }
 
@@ -315,6 +319,9 @@ final class OneDumbbell extends Dumbbell {
 
   @override
   int _oneOf(int grams) => grams;
+
+  @override
+  String? _each(int grams) => null;
 
   @override
   String get name => 'oneDumbbell';

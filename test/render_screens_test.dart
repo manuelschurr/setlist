@@ -28,6 +28,13 @@ Future<void> _loadFonts() async {
   await icons.load();
 }
 
+/// The panel's weight caption shrinks rather than overflow, so one that fits is drawn at its natural width.
+void _expectCaptionFits(WidgetTester tester, {String? reason}) {
+  final box = find.byKey(const ValueKey('weight caption'));
+  final line = find.descendant(of: box, matching: find.byWidgetPredicate((_) => true)).first;
+  expect(tester.getSize(line).width, lessThanOrEqualTo(tester.getSize(box).width), reason: reason);
+}
+
 void main() {
   final out = Platform.environment['SETLIST_RENDER_DIR'];
   final boundary = GlobalKey();
@@ -60,9 +67,8 @@ void main() {
     store.saveDay(Workout(day: today, entries: [Slot(squat, [const SetEntry(grams: 102500, reps: 5)])]));
     await tester.pumpWidget(MaterialApp(theme: setlistTheme(Brightness.light), home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today)));
     await tester.pumpAndSettle();
-    final caption = find.text(const Barbell(20000).breakdown(102500));
-    expect(caption, findsOneWidget);
-    expect(tester.renderObject<RenderParagraph>(find.descendant(of: caption, matching: find.byType(RichText))).didExceedMaxLines, isFalse);
+    expect(find.text(const Barbell(20000).breakdown(102500)), findsOneWidget);
+    _expectCaptionFits(tester);
   });
 
   testWidgets('the longest usual adjustable dumbbell caption fits its stepper on the test phone, in real fonts', (tester) async {
@@ -78,29 +84,32 @@ void main() {
     store.saveDay(Workout(day: today, entries: [Slot(curl, [const SetEntry(grams: 47000, reps: 8)])]));
     await tester.pumpWidget(MaterialApp(theme: setlistTheme(Brightness.light), home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today)));
     await tester.pumpAndSettle();
-    final caption = find.text(pair.breakdown(47000));
-    expect(caption, findsOneWidget);
-    expect(tester.renderObject<RenderParagraph>(find.descendant(of: caption, matching: find.byType(RichText))).didExceedMaxLines, isFalse);
+    expect(find.text(pair.breakdown(47000)), findsOneWidget);
+    _expectCaptionFits(tester);
   });
 
-  testWidgets('the longest plate line for a pair up to 60 kg fits the panel on the test phone, in real fonts', (tester) async {
+  testWidgets('the plates of every pair from 5 to 60 kg fit under the weight on the test phone, in real fonts', (tester) async {
     await tester.runAsync(_loadFonts);
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.8125;
     addTearDown(tester.view.reset);
     final store = Store.inMemory();
     addTearDown(store.close);
-    final plates = Plates({for (final grams in [500, 1000, 1250, 2000, 2500, 5000, 10000, 15000]) grams: 4});
-    store.savePlates(plates);
-    const pair = DumbbellPair(handleGrams: 2500);
-    final longest = [for (var grams = 5000; grams <= 60000; grams += 500) grams].reduce((a, b) => pair.plateLine(b, plates)!.length > pair.plateLine(a, plates)!.length ? b : a);
-    final curl = store.createExercise(name: 'Hammer Curl', kind: ExerciseKind.weightReps, equipment: pair);
-    store.saveDay(Workout(day: today, entries: [Slot(curl, [SetEntry(grams: longest, reps: 8)])]));
+    store.savePlates(Plates({for (final grams in [500, 1000, 1250, 2000, 2500, 5000, 10000, 15000]) grams: 4}));
+    final curl = store.createExercise(name: 'Hammer Curl', kind: ExerciseKind.weightReps, equipment: const DumbbellPair(handleGrams: 2500), weightStepGrams: 500);
+    store.saveDay(Workout(day: today, entries: [Slot(curl, [const SetEntry(grams: 5000, reps: 8)])]));
     await tester.pumpWidget(MaterialApp(theme: setlistTheme(Brightness.light), home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today)));
     await tester.pumpAndSettle();
-    final line = find.text(pair.plateLine(longest, plates)!);
-    expect(line, findsOneWidget);
-    expect(tester.renderObject<RenderParagraph>(find.descendant(of: line, matching: find.byType(RichText))).didExceedMaxLines, isFalse, reason: pair.plateLine(longest, plates));
+    final panel = find.byKey(const ValueKey('panel'));
+    final height = tester.getSize(panel).height;
+    // The line for a total the plates can't make, the widest text, comes up at every x.75 kg on each end.
+    for (var grams = 5500; grams <= 60000; grams += 500) {
+      await tester.tap(find.byTooltip('Increase weight'));
+      await tester.pump();
+      expect(tester.getSize(panel).height, height, reason: '$grams g');
+      _expectCaptionFits(tester, reason: '$grams g');
+    }
+    expect(store.loadDay(today).slotOf(curl.id)!.sets.single.grams, 60000);
   });
 
   testWidgets('render the workout flow', (tester) async {
@@ -118,7 +127,7 @@ void main() {
     final plank = store.createExercise(name: 'Plank', kind: ExerciseKind.time, category: 'Core');
     store.saveDay(Workout(day: daysAgo(3), entries: [
       Slot(squat, [kg(20, 8, warmup: true), kg(34, 5), kg(34, 5), kg(34, 5)]),
-      Slot(bench, [kg(13, 10), kg(13, 10), kg(13, 10)]),
+      Slot(bench, [kg(14, 10), kg(14, 10), kg(14, 10)]),
       Slot(raise, [kg(8, 15), kg(8, 15), kg(8, 15)]),
       Slot(plank, [SetEntry(seconds: 60, status: Done(DateTime.now())), SetEntry(seconds: 60, status: Done(DateTime.now()))]),
     ]));
@@ -156,6 +165,28 @@ void main() {
       ),
     ));
     await shot(tester, '05-dark');
+  }, skip: out == null);
+
+  testWidgets('render a heavy adjustable pair', (tester) async {
+    await tester.runAsync(_loadFonts);
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.8125;
+    addTearDown(tester.view.reset);
+    final store = Store.inMemory();
+    addTearDown(store.close);
+    store.savePlates(Plates({for (final grams in [500, 1000, 1250, 2000, 2500, 5000]) grams: 4}));
+    final press = store.createExercise(name: 'Dumbbell Shoulder Press', kind: ExerciseKind.weightReps, equipment: const DumbbellPair(handleGrams: 2500));
+    // 23 kg each puts 10.25 kg on each end, five plates, the widest line these plates make.
+    store.saveDay(Workout(day: today, entries: [Slot(press, [const SetEntry(grams: 46000, reps: 6), const SetEntry(grams: 46000, reps: 6)])]));
+    await tester.pumpWidget(RepaintBoundary(
+      key: boundary,
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: setlistTheme(Brightness.light),
+        home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today),
+      ),
+    ));
+    await shot(tester, '10-heavy-pair');
   }, skip: out == null);
 
   testWidgets('render a superset day', (tester) async {

@@ -892,36 +892,38 @@ void main() {
         expect(Plates({500: 2, 1000: 4}).pieces.keys, [1000, 500]);
       });
 
-      test('an adjustable dumbbell names the plates for each end', () {
+      test('an adjustable dumbbell names the plates for each end, after what a fixed one would say', () {
         const pair = DumbbellPair(handleGrams: 2500);
-        expect(pair.plateLine(14000, home), '1.25 + 1 kg on each end');
-        expect(pair.plateLine(15000, home), '2.5 kg on each end');
-        expect(pair.plateLine(47000, home), '10 + 0.5 kg on each end');
-        expect(const OneDumbbell(handleGrams: 2500).plateLine(7000, home), '1.25 + 1 kg on each end');
-        expect(const OneDumbbell(handleGrams: 2500).plateLine(32500, home), '15 kg on each end');
+        const one = OneDumbbell(handleGrams: 2500);
+        expect(pair.loading(14000, home)?.plates, [1250, 1000]);
+        expect(pair.loading(14000, home)?.each, '7 kg each');
+        expect(pair.loading(15000, home)?.plates, [2500]);
+        expect(pair.loading(47000, home)?.plates, [10000, 500]);
+        expect(one.loading(7000, home)?.plates, [1250, 1000]);
+        expect(one.loading(7000, home)?.each, isNull, reason: 'one dumbbell weighs its total');
+        expect(one.loading(32500, home)?.plates, [15000]);
       });
 
-      test('a total the plates cannot make says what each end would need', () {
+      test("a total the plates can't make keeps what a fixed dumbbell would say and has no plates", () {
         const pair = DumbbellPair(handleGrams: 2500);
-        expect(pair.plateLine(8000, home), "your plates can't make 0.75 kg on each end");
-        expect(pair.plateLine(14250, home), "your plates can't make 2.31 kg on each end");
-        expect(Plates({1250: 2, 1000: 4}).forEachEnd(2250, ends: 4), isNull);
-        expect(pair.plateLine(14000, Plates({1250: 2, 1000: 4})), "your plates can't make 2.25 kg on each end");
-      });
-
-      test('the line stays, blank, at or below the handle and at 0 kg', () {
-        const pair = DumbbellPair(handleGrams: 2500);
-        for (final grams in [5000, 4000, 0, -2000]) {
-          expect(pair.plateLine(grams, home), '', reason: '$grams g');
-          expect(const OneDumbbell(handleGrams: 2500).plateLine(grams ~/ 2, home), '', reason: '$grams g');
+        for (final (grams, plates) in [(8000, home), (14250, home), (14000, Plates({1250: 2, 1000: 4}))]) {
+          final loading = pair.loading(grams, plates);
+          expect(loading, isNotNull, reason: '$grams g');
+          expect(loading!.plates, isNull, reason: '$grams g');
+          expect(loading.each, pair.loading(grams, home)!.each, reason: '$grams g');
         }
+        expect(Plates({1250: 2, 1000: 4}).forEachEnd(2250, ends: 4), isNull);
       });
 
-      test('there is no plate line without a handle or without plates, whatever the total', () {
+      test('there is no loading at or below the handle, at 0 kg, or without a handle or plates', () {
+        for (final grams in [5000, 4000, 0, -2000]) {
+          expect(const DumbbellPair(handleGrams: 2500).loading(grams, home), isNull, reason: '$grams g');
+          expect(const OneDumbbell(handleGrams: 2500).loading(grams ~/ 2, home), isNull, reason: '$grams g');
+        }
         for (final grams in [-5000, 0, 14000]) {
-          expect(Equipment.dumbbellPair.plateLine(grams, home), isNull, reason: '$grams g');
-          expect(Equipment.oneDumbbell.plateLine(grams, home), isNull, reason: '$grams g');
-          expect(const DumbbellPair(handleGrams: 2500).plateLine(grams, Plates.none), isNull, reason: '$grams g');
+          expect(Equipment.dumbbellPair.loading(grams, home), isNull, reason: '$grams g');
+          expect(Equipment.oneDumbbell.loading(grams, home), isNull, reason: '$grams g');
+          expect(const DumbbellPair(handleGrams: 2500).loading(grams, Plates.none), isNull, reason: '$grams g');
         }
       });
     });

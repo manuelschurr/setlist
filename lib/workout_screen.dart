@@ -9,6 +9,7 @@ import 'package:flutter/rendering.dart';
 import 'day.dart';
 import 'drive_backup.dart';
 import 'equipment_mark.dart';
+import 'plate_strip.dart';
 import 'plates_dialog.dart';
 import 'exercise_history_screen.dart';
 import 'exercise_picker.dart';
@@ -778,9 +779,6 @@ class _Panel extends StatelessWidget {
       final next = focusAfterLog(state.workout, ref);
       final then = next == null || next.exercise == ref.exercise ? null : state.workout.entryOf(ref.exercise)!.slots.where((s) => s.exercise.id == next.exercise).firstOrNull?.exercise.name;
       final equipment = slot.exercise.equipment;
-      final caption = equipment.breakdown(set.grams);
-      final blankToLevelButtons = caption == null ? null : '';
-      final plateLine = equipment is Dumbbell ? equipment.plateLine(set.grams, plates) : null;
       content = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -804,27 +802,16 @@ class _Panel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              for (final (i, field) in slot.exercise.kind.fields.indexed) ...[
-                if (i > 0) const SizedBox(width: 12),
-                Expanded(
-                  child: _Stepper(
-                    field: field,
-                    value: field.read(set),
-                    onStep: (up) => onCommand(SetField(ref, field, field.stepped(slot.exercise, field.read(set), up: up))),
-                    onTyped: (value) => onCommand(SetField(ref, field, value)),
-                    mark: field == Field.weight ? equipment : Equipment.none,
-                    caption: field == Field.weight ? caption : blankToLevelButtons,
-                  ),
-                ),
-              ],
-            ],
-          ),
-          // Full width, because five plates on an end are wider than the weight stepper. Kept, blank, at or below the handle, so stepping never moves the button.
-          if (plateLine != null) ...[
-            const SizedBox(height: 8),
-            Text(plateLine, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
+          for (final (i, field) in slot.exercise.kind.fields.indexed) ...[
+            if (i > 0) const SizedBox(height: 4),
+            _Stepper(
+              field: field,
+              value: field.read(set),
+              onStep: (up) => onCommand(SetField(ref, field, field.stepped(slot.exercise, field.read(set), up: up))),
+              onTyped: (value) => onCommand(SetField(ref, field, value)),
+              mark: field == Field.weight ? equipment : Equipment.none,
+              caption: field == Field.weight ? _weightCaption(theme, equipment, set.grams, plates) : null,
+            ),
           ],
           const SizedBox(height: 12),
           FilledButton(
@@ -848,7 +835,23 @@ class _Panel extends StatelessWidget {
   }
 }
 
-/// [onTyped] fires once, when the dialog is confirmed, never per keystroke. Each call runs the cascade, and typing 10 over a 5 would pass through 1 and capture any later planned set that really held 1.
+/// The line under the weight and what a screen reader says for it: the plates for each end once the lifter has counted them, otherwise the equipment's breakdown. Null for equipment that never splits a total.
+(Widget, String)? _weightCaption(ThemeData theme, Equipment equipment, int grams, Plates plates) {
+  final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+  final loading = equipment is Dumbbell ? equipment.loading(grams, plates) : null;
+  if (loading == null) {
+    final text = equipment.breakdown(grams);
+    return text == null ? null : (Text(text, style: muted, maxLines: 1), text);
+  }
+  final (:each, plates: perEnd) = loading;
+  final lead = each == null ? '' : '$each, ';
+  if (perEnd == null) {
+    return (Text.rich(TextSpan(children: [if (each != null) TextSpan(text: '$each · '), TextSpan(text: 'not with your plates', style: TextStyle(color: theme.colorScheme.error))]), style: muted, maxLines: 1), '${lead}not with your plates');
+  }
+  return (Row(mainAxisSize: MainAxisSize.min, children: [if (each != null) ...[Text(each, style: muted), const SizedBox(width: 6)], PlateStrip(perEnd)]), '$lead${perEnd.map(Field.weight.format).join(' + ')} kg on each end');
+}
+
+/// One field as a segmented row: minus, the value with its [caption] under it, plus. Tapping the value types it. [onTyped] fires once, when the dialog is confirmed, never per keystroke. Each call runs the cascade, and typing 10 over a 5 would pass through 1 and capture any later planned set that really held 1.
 class _Stepper extends StatelessWidget {
   const _Stepper({required this.field, required this.value, required this.onStep, required this.onTyped, required this.mark, required this.caption});
 
@@ -857,60 +860,79 @@ class _Stepper extends StatelessWidget {
   final ValueChanged<bool> onStep;
   final ValueChanged<int> onTyped;
   final Equipment mark;
-  final String? caption;
+  final (Widget, String)? caption;
+
+  static const _height = 52.0;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant;
+    final scheme = theme.colorScheme;
+    final muted = scheme.onSurfaceVariant;
     final unit = unitOf(field);
     final name = field.name;
-    final spoken = caption == null || caption!.isEmpty ? '' : ', $caption';
-    Widget button(IconData icon, String tooltip, bool up) => Expanded(
-      child: Tooltip(
-        message: tooltip,
-        child: FilledButton.tonal(
-          style: FilledButton.styleFrom(minimumSize: const Size(56, 56), padding: EdgeInsets.zero),
-          onPressed: () => onStep(up),
-          child: Icon(icon, size: 28),
+    final spoken = caption == null || caption!.$2.isEmpty ? '' : ', ${caption!.$2}';
+    const end = Radius.circular(_height / 2);
+    const inner = Radius.circular(4);
+    Widget button(IconData icon, String tooltip, bool up) => Tooltip(
+      message: tooltip,
+      child: FilledButton.tonal(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(64, _height),
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.horizontal(left: up ? inner : end, right: up ? end : inner)),
         ),
+        onPressed: () => onStep(up),
+        child: Icon(icon, size: 28),
       ),
     );
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () async {
-            final typed = await showDialog<int>(context: context, builder: (_) => _ValueDialog(field: field, value: value));
-            if (typed != null) onTyped(typed);
-          },
-          child: SizedBox(
-            height: 48,
-            width: double.infinity,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                EquipmentMark(mark, height: 22, color: muted),
-                Flexible(
-                  child: Text.rich(
-                    TextSpan(
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          button(Icons.remove, 'Decrease $name', false),
+          const SizedBox(width: 2),
+          Expanded(
+            child: Material(
+              color: scheme.surfaceContainerLowest,
+              borderRadius: const BorderRadius.all(inner),
+              child: InkWell(
+                borderRadius: const BorderRadius.all(inner),
+                onTap: () async {
+                  final typed = await showDialog<int>(context: context, builder: (_) => _ValueDialog(field: field, value: value));
+                  if (typed != null) onTyped(typed);
+                },
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        TextSpan(text: field.format(value), style: theme.textTheme.headlineMedium),
-                        if (unit != null) TextSpan(text: ' $unit', style: theme.textTheme.bodyMedium?.copyWith(color: muted)),
+                        EquipmentMark(mark, height: 22, color: muted),
+                        Flexible(
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(text: field.format(value), style: theme.textTheme.headlineMedium?.copyWith(height: 1.1)),
+                                if (unit != null) TextSpan(text: ' $unit', style: theme.textTheme.bodyMedium?.copyWith(color: muted)),
+                              ],
+                            ),
+                            semanticsLabel: '$name ${field.format(value)}${unit == null ? '' : ' $unit'}$spoken, tap to type',
+                          ),
+                        ),
                       ],
                     ),
-                    semanticsLabel: '$name ${field.format(value)}${unit == null ? '' : ' $unit'}$spoken, tap to type',
-                  ),
+                    // Tall enough for the plates, kept when blank, so the value never moves while stepping. Shrinks a line too wide for large text rather than cut it.
+                    if (caption case (final line, _)) SizedBox(height: MediaQuery.textScalerOf(context).scale(PlateStrip.maxHeight), child: FittedBox(key: const ValueKey('weight caption'), fit: BoxFit.scaleDown, child: ExcludeSemantics(child: line))),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-        ),
-        if (caption != null) Text(caption!, style: theme.textTheme.bodySmall?.copyWith(color: muted), maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
-        const SizedBox(height: 4),
-        Row(children: [button(Icons.remove, 'Decrease $name', false), const SizedBox(width: 8), button(Icons.add, 'Increase $name', true)]),
-      ],
+          const SizedBox(width: 2),
+          button(Icons.add, 'Increase $name', true),
+        ],
+      ),
     );
   }
 }
