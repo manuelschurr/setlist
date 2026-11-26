@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:setlist/day.dart';
 import 'package:setlist/drive_backup.dart';
 import 'package:setlist/main.dart';
+import 'package:setlist/plate_strip.dart';
 import 'package:setlist/rest_alarm.dart';
 import 'package:setlist/store.dart';
 import 'package:setlist/workout_screen.dart';
@@ -34,6 +35,9 @@ void _expectCaptionFits(WidgetTester tester, {String? reason}) {
   final line = find.descendant(of: box, matching: find.byWidgetPredicate((_) => true)).first;
   expect(tester.getSize(line).width, lessThanOrEqualTo(tester.getSize(box).width), reason: reason);
 }
+
+/// The owner's plate sizes.
+const _homePlates = [500, 1000, 1250, 2000, 2500, 5000, 10000, 15000];
 
 void main() {
   final out = Platform.environment['SETLIST_RENDER_DIR'];
@@ -95,7 +99,7 @@ void main() {
     addTearDown(tester.view.reset);
     final store = Store.inMemory();
     addTearDown(store.close);
-    store.savePlates(Plates({for (final grams in [500, 1000, 1250, 2000, 2500, 5000, 10000, 15000]) grams: 4}));
+    store.savePlates(Plates(_homePlates));
     final curl = store.createExercise(name: 'Hammer Curl', kind: ExerciseKind.weightReps, equipment: const DumbbellPair(handleGrams: 2500), weightStepGrams: 500);
     store.saveDay(Workout(day: today, entries: [Slot(curl, [const SetEntry(grams: 5000, reps: 8)])]));
     await tester.pumpWidget(MaterialApp(theme: setlistTheme(Brightness.light), home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today)));
@@ -112,6 +116,31 @@ void main() {
     expect(store.loadDay(today).slotOf(curl.id)!.sets.single.grams, 60000);
   });
 
+  testWidgets('the plates of every barbell load from 20 to 155 kg fit under the weight on the test phone, in real fonts', (tester) async {
+    await tester.runAsync(_loadFonts);
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.8125;
+    addTearDown(tester.view.reset);
+    final store = Store.inMemory();
+    addTearDown(store.close);
+    store.savePlates(Plates(_homePlates));
+    final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, equipment: const Barbell(20000), weightStepGrams: 2500);
+    store.saveDay(Workout(day: today, entries: [Slot(squat, [const SetEntry(grams: 20000, reps: 5)])]));
+    await tester.pumpWidget(MaterialApp(theme: setlistTheme(Brightness.light), home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today)));
+    await tester.pumpAndSettle();
+    final panel = find.byKey(const ValueKey('panel'));
+    final height = tester.getSize(panel).height;
+    // 152.5 kg puts 15, 15, 15, 15, 5 and 1.25 on each side, six plates, the widest line up to here. Heavier loads of seven plates shrink the line.
+    for (var grams = 22500; grams <= 155000; grams += 2500) {
+      await tester.tap(find.byTooltip('Increase weight'));
+      await tester.pump();
+      expect(tester.getSize(panel).height, height, reason: '$grams g');
+      _expectCaptionFits(tester, reason: '$grams g');
+    }
+    expect(find.byType(PlateStrip), findsOneWidget);
+    expect(store.loadDay(today).slotOf(squat.id)!.sets.single.grams, 155000);
+  });
+
   testWidgets('render the workout flow', (tester) async {
     await tester.runAsync(_loadFonts);
     tester.view.physicalSize = const Size(1080, 2400);
@@ -122,7 +151,7 @@ void main() {
     addTearDown(store.close);
     final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, category: 'Legs', equipment: const Barbell(20000));
     final bench = store.createExercise(name: 'Incline Dumbbell Bench Press', kind: ExerciseKind.weightReps, category: 'Chest', equipment: const DumbbellPair(handleGrams: 2500));
-    store.savePlates(Plates({for (final grams in [500, 1000, 1250, 2000, 2500, 5000]) grams: 4}));
+    store.savePlates(Plates(_homePlates));
     final raise = store.createExercise(name: 'Lateral Dumbbell Raise', kind: ExerciseKind.weightReps, category: 'Shoulders', equipment: Equipment.oneDumbbell);
     final plank = store.createExercise(name: 'Plank', kind: ExerciseKind.time, category: 'Core');
     store.saveDay(Workout(day: daysAgo(3), entries: [
@@ -174,9 +203,9 @@ void main() {
     addTearDown(tester.view.reset);
     final store = Store.inMemory();
     addTearDown(store.close);
-    store.savePlates(Plates({for (final grams in [500, 1000, 1250, 2000, 2500, 5000]) grams: 4}));
+    store.savePlates(Plates(_homePlates));
     final press = store.createExercise(name: 'Dumbbell Shoulder Press', kind: ExerciseKind.weightReps, equipment: const DumbbellPair(handleGrams: 2500));
-    // 23 kg each puts 10.25 kg on each end, five plates, the widest line these plates make.
+    // 23 kg each puts 5, 2, 2 and 1.25 on each end.
     store.saveDay(Workout(day: today, entries: [Slot(press, [const SetEntry(grams: 46000, reps: 6), const SetEntry(grams: 46000, reps: 6)])]));
     await tester.pumpWidget(RepaintBoundary(
       key: boundary,
@@ -187,6 +216,27 @@ void main() {
       ),
     ));
     await shot(tester, '10-heavy-pair');
+  }, skip: out == null);
+
+  testWidgets('render a heavy barbell', (tester) async {
+    await tester.runAsync(_loadFonts);
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.8125;
+    addTearDown(tester.view.reset);
+    final store = Store.inMemory();
+    addTearDown(store.close);
+    store.savePlates(Plates(_homePlates));
+    final deadlift = store.createExercise(name: 'Deadlift', kind: ExerciseKind.weightReps, equipment: const Barbell(20000));
+    store.saveDay(Workout(day: today, entries: [Slot(deadlift, [const SetEntry(grams: 152500, reps: 5), const SetEntry(grams: 152500, reps: 5)])]));
+    await tester.pumpWidget(RepaintBoundary(
+      key: boundary,
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: setlistTheme(Brightness.light),
+        home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today),
+      ),
+    ));
+    await shot(tester, '11-heavy-barbell');
   }, skip: out == null);
 
   testWidgets('render a superset day', (tester) async {

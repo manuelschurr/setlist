@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 
 import 'day.dart';
 
-/// One end of an adjustable dumbbell seen from the side: a stub of the handle, then [plates] in grams from the inside out, each a dark plate with its weight on it and taller the heavier it is, so the lifter reads the loading without a sentence.
+/// One side of a barbell or one end of an adjustable dumbbell, seen from the side: a stub of the bar or handle, then [plates] in grams from the inside out, each a dark plate with its weight on it and taller the heavier it is, so the lifter reads the loading without a sentence.
 class PlateStrip extends StatelessWidget {
   const PlateStrip(this.plates, {super.key});
 
@@ -35,7 +35,7 @@ class PlateStrip extends StatelessWidget {
             if (i > 0) bar(1.5),
             Container(
               height: textScaler.scale(_height(grams)),
-              padding: const EdgeInsets.symmetric(horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 3),
               alignment: Alignment.center,
               decoration: BoxDecoration(color: scheme.onSurfaceVariant, borderRadius: BorderRadius.circular(3)),
               child: Text(Field.weight.format(grams), style: label),

@@ -835,20 +835,20 @@ class _Panel extends StatelessWidget {
   }
 }
 
-/// The line under the weight and what a screen reader says for it: the plates for each end once the lifter has counted them, otherwise the equipment's breakdown. Null for equipment that never splits a total.
+/// The line under the weight and what a screen reader says for it: the plates for each side or end once the lifter has said which they own, otherwise the equipment's breakdown. Null for equipment that never splits a total.
 (Widget, String)? _weightCaption(ThemeData theme, Equipment equipment, int grams, Plates plates) {
   final muted = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
-  final loading = equipment is Dumbbell ? equipment.loading(grams, plates) : null;
+  final loading = equipment.loading(grams, plates);
   if (loading == null) {
     final text = equipment.breakdown(grams);
     return text == null ? null : (Text(text, style: muted, maxLines: 1), text);
   }
-  final (:each, plates: perEnd) = loading;
-  final lead = each == null ? '' : '$each, ';
-  if (perEnd == null) {
-    return (Text.rich(TextSpan(children: [if (each != null) TextSpan(text: '$each · '), TextSpan(text: 'not with your plates', style: TextStyle(color: theme.colorScheme.error))]), style: muted, maxLines: 1), '${lead}not with your plates');
+  final (:lead, plates: onOne, :onEach) = loading;
+  final spokenLead = lead == null ? '' : '$lead, ';
+  if (onOne == null) {
+    return (Text.rich(TextSpan(children: [if (lead != null) TextSpan(text: '$lead · '), TextSpan(text: 'not with your plates', style: TextStyle(color: theme.colorScheme.error))]), style: muted, maxLines: 1), '${spokenLead}not with your plates');
   }
-  return (Row(mainAxisSize: MainAxisSize.min, children: [if (each != null) ...[Text(each, style: muted), const SizedBox(width: 6)], PlateStrip(perEnd)]), '$lead${perEnd.map(Field.weight.format).join(' + ')} kg on each end');
+  return (Row(mainAxisSize: MainAxisSize.min, children: [if (lead != null) ...[Text(lead, style: muted), const SizedBox(width: 6)], PlateStrip(onOne)]), '$spokenLead${onOne.map(Field.weight.format).join(' + ')} kg on each $onEach');
 }
 
 /// One field as a segmented row: minus, the value with its [caption] under it, plus. Tapping the value types it. [onTyped] fires once, when the dialog is confirmed, never per keystroke. Each call runs the cascade, and typing 10 over a 5 would pass through 1 and capture any later planned set that really held 1.
