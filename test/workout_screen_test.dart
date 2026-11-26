@@ -439,9 +439,10 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Finder plateCount(num kg) => find.byKey(ValueKey('plates ${(kg * 1000).round()}'));
+  Finder plateChip(num kg) => find.byKey(ValueKey('plates ${(kg * 1000).round()}'));
+  bool owned(WidgetTester tester, num kg) => tester.widget<FilterChip>(plateChip(kg)).selected;
 
-  testWidgets('entering plates draws the plates for each end under an adjustable pair, and the dialog shows them again', (tester) async {
+  testWidgets('picking plates draws the plates for each end under an adjustable pair, and the dialog shows them again', (tester) async {
     final semantics = tester.ensureSemantics();
     bench = withEquipment(bench, const DumbbellPair(handleGrams: 2500));
     store.saveDay(Workout(day: today, entries: [Slot(bench, sets(1, 14, 10))]));
@@ -450,12 +451,14 @@ void main() {
     expect(inPanel(find.byType(PlateStrip)), findsNothing);
 
     await openPlates(tester);
-    expect(plateCount(15), findsOneWidget, reason: 'usual sizes are offered before any is owned');
-    await tester.enterText(plateCount(1.25), '4');
-    await tester.enterText(plateCount(1), '4');
+    expect(plateChip(15), findsOneWidget, reason: 'usual sizes are offered before any is owned');
+    expect(owned(tester, 15), isFalse);
+    await tester.tap(plateChip(1.25));
+    await tester.tap(plateChip(1));
+    await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
-    expect(store.loadPlates(), Plates({1250: 4, 1000: 4}));
+    expect(store.loadPlates(), Plates([1250, 1000]));
     expect(inPanel(find.text('7 kg each')), findsOneWidget);
     expect(tester.widget<PlateStrip>(inPanel(find.byType(PlateStrip))).plates, [1250, 1000]);
     expect(find.bySemanticsLabel(RegExp(r'weight 14 kg, 7 kg each, 1\.25 \+ 1 kg on each end, tap to type')), findsOneWidget);
@@ -466,41 +469,63 @@ void main() {
     expect(inPanel(find.textContaining(RegExp(r'^[\d.]+ kg each · not with your plates$'), findRichText: true)), findsOneWidget);
 
     await openPlates(tester);
-    expect(tester.widget<TextField>(plateCount(1.25)).controller!.text, '4');
-    expect(tester.widget<TextField>(plateCount(2)).controller!.text, '');
+    expect(owned(tester, 1.25), isTrue);
+    expect(owned(tester, 2), isFalse);
+    await tester.tap(plateChip(2));
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pumpAndSettle();
-    expect(store.loadPlates(), Plates({1250: 4, 1000: 4}));
+    expect(store.loadPlates(), Plates([1250, 1000]));
     semantics.dispose();
   });
 
-  testWidgets('a count that is not a whole number keeps the plates dialog open, and another size joins the list', (tester) async {
+  testWidgets('another size joins the list picked, a second tap drops a size, and a size of 0 is refused', (tester) async {
     store.saveDay(Workout(day: today, entries: [Slot(bench, sets(1, 14, 10))]));
     await openToday(tester);
     await openPlates(tester);
-    await tester.enterText(plateCount(2.5), '2.5');
-    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
-    await tester.pumpAndSettle();
-    expect(find.text('Whole number'), findsOneWidget);
-    expect(find.text('Your plates'), findsOneWidget);
+    await tester.tap(plateChip(2.5));
+    await tester.pump();
+    expect(owned(tester, 2.5), isTrue);
+    await tester.tap(plateChip(2.5));
+    await tester.pump();
+    expect(owned(tester, 2.5), isFalse);
 
-    await tester.enterText(plateCount(2.5), '');
-    await tester.enterText(find.widgetWithText(TextField, 'Another size'), '0.75');
+    await tester.enterText(find.widgetWithText(TextField, 'Another size'), '0');
     await tester.ensureVisible(find.byTooltip('Add size'));
+    await tester.tap(find.byTooltip('Add size'));
+    await tester.pump();
+    expect(find.text('Type a weight above 0, such as 0.75'), findsOneWidget);
+
+    await tester.enterText(find.widgetWithText(TextField, 'Another size'), '0.75');
     await tester.tap(find.byTooltip('Add size'));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(TextField, '0.75'), findsNothing, reason: 'the size field empties once added');
-    await tester.enterText(plateCount(0.75), '2');
+    expect(owned(tester, 0.75), isTrue);
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
-    expect(store.loadPlates(), Plates({750: 2}));
+    expect(store.loadPlates(), Plates([750]));
 
     await openPlates(tester);
-    expect(tester.widget<TextField>(plateCount(0.75)).controller!.text, '2');
+    expect(owned(tester, 0.75), isTrue);
+  });
+
+  testWidgets('with plates, a barbell draws the plates for each side after the bar', (tester) async {
+    final semantics = tester.ensureSemantics();
+    store.savePlates(Plates([1250, 2500, 5000, 10000, 15000]));
+    squat = withEquipment(squat, const Barbell(20000));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, sets(1, 60, 5))]));
+    await openToday(tester);
+    expect(inPanel(find.text('20 kg bar')), findsOneWidget);
+    expect(tester.widget<PlateStrip>(inPanel(find.byType(PlateStrip))).plates, [15000, 5000]);
+    expect(find.bySemanticsLabel(RegExp(r'weight 60 kg, 20 kg bar, 15 \+ 5 kg on each side, tap to type')), findsOneWidget);
+
+    await tester.tap(inPanel(find.byTooltip('Increase weight')));
+    await tester.pump();
+    expect(tester.widget<PlateStrip>(inPanel(find.byType(PlateStrip))).plates, [15000, 5000, 1250]);
+    semantics.dispose();
   });
 
   testWidgets("with plates, an adjustable pair keeps the panel's height from its plates down to 0 kg", (tester) async {
-    store.savePlates(Plates({1250: 4, 1000: 4}));
+    store.savePlates(Plates([1250, 1000]));
     bench = withEquipment(bench, const DumbbellPair(handleGrams: 2500));
     store.saveDay(Workout(day: today, entries: [Slot(bench, [kg(14, 10), kg(5, 10), kg(0, 10)])]));
     await openToday(tester);

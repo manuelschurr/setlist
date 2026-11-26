@@ -235,22 +235,22 @@ void main() {
     });
 
     test('saved plates load back, survive a reopen, and a later save replaces them all', () {
-      final home = Plates({500: 4, 1000: 4, 1250: 4, 15000: 2});
+      final home = Plates([500, 1000, 1250, 15000]);
       store.savePlates(home);
       expect(store.loadPlates(), home);
       store.close();
       store = Store.open(path);
       expect(store.loadPlates(), home);
-      store.savePlates(Plates({2500: 8}));
-      expect(store.loadPlates(), Plates({2500: 8}));
+      store.savePlates(Plates([2500]));
+      expect(store.loadPlates(), Plates([2500]));
       store.savePlates(Plates.none);
       expect(store.loadPlates(), Plates.none);
     });
 
     test('an import leaves the plates alone', () {
-      store.savePlates(Plates({1250: 4}));
+      store.savePlates(Plates([1250]));
       store.importBatch(const ImportBatch(source: 'fitnotes', exercises: [ImportedExercise(key: '7', name: 'Curl', kind: ExerciseKind.weightReps)], days: []));
-      expect(store.loadPlates(), Plates({1250: 4}));
+      expect(store.loadPlates(), Plates([1250]));
     });
   });
 
@@ -531,10 +531,43 @@ PRAGMA user_version = 3;
       expect([for (final row in copy.select('SELECT id FROM exercise ORDER BY id')) row['id']], [3, 7, 9, 12]);
     });
 
-    test('a plate is stored only with a weight and pieces above 0', () {
+    test('a v4 file keeps every plate size it counted, drops the counts, keeps its exercises and a v4 copy, and ends with the schema a new file has', () {
+      final v4 = '$path.v4';
+      sqlite3.open(v4)
+        ..execute(File('test/schema_v4.sql').readAsStringSync())
+        ..execute('''
+INSERT INTO exercise (id, name, kind, category, weight_step_g, rest_s, import_key, equipment, bar_g, handle_g) VALUES (3, 'Squat', 'weightReps', 'Legs', 2500, 120, NULL, 'barbell', 20000, NULL), (7, 'Hammer Curl', 'weightReps', NULL, 1000, 90, NULL, 'dumbbellPair', NULL, 2500);
+INSERT INTO plate (weight_g, pieces) VALUES (500, 4), (1250, 2), (15000, 1);
+PRAGMA user_version = 4;
+''')
+        ..close();
+
+      final migrated = Store.open(v4);
+      addTearDown(migrated.close);
+      expect(migrated.loadPlates(), Plates([500, 1250, 15000]));
+      expect(migrated.exercises().map((e) => e.equipment).toSet(), {const Barbell(20000), const DumbbellPair(handleGrams: 2500)});
+
+      List<String> schema(String file) {
+        final db = sqlite3.open(file, mode: OpenMode.readOnly);
+        try {
+          return [for (final row in db.select('SELECT type, name, sql FROM sqlite_master ORDER BY rowid')) '$row', 'user_version ${db.userVersion}'];
+        } finally {
+          db.close();
+        }
+      }
+
+      expect(schema(v4), schema(path));
+      final copy = sqlite3.open('$v4.v4.bak', mode: OpenMode.readOnly);
+      addTearDown(copy.close);
+      expect(copy.userVersion, 4);
+      expect([for (final row in copy.select('SELECT weight_g, pieces FROM plate ORDER BY weight_g')) row.values], [[500, 4], [1250, 2], [15000, 1]]);
+    });
+
+    test('a plate size is stored only above 0, and once', () {
       final raw = sqlite3.open(path);
       addTearDown(raw.close);
-      for (final insert in ['INSERT INTO plate (weight_g, pieces) VALUES (0, 2)', 'INSERT INTO plate (weight_g, pieces) VALUES (500, 0)', 'INSERT INTO plate (weight_g, pieces) VALUES (500, -2)']) {
+      raw.execute('INSERT INTO plate (weight_g) VALUES (500)');
+      for (final insert in ['INSERT INTO plate (weight_g) VALUES (0)', 'INSERT INTO plate (weight_g) VALUES (-500)', 'INSERT INTO plate (weight_g) VALUES (500)']) {
         expect(() => raw.execute(insert), throwsA(isA<SqliteException>()), reason: insert);
       }
     });
