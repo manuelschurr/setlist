@@ -81,14 +81,14 @@ final class Store {
     return [for (final row in rows) _exercise(row)];
   }
 
-  /// The plate sizes the lifter owns, [Plates.none] until they are entered.
-  Plates loadPlates() => Plates([for (final row in _sql('SELECT weight_g FROM plate').select()) row['weight_g'] as int]);
+  /// The plates the lifter owns, [Plates.none] until they are entered.
+  Plates loadPlates() => Plates({for (final row in _sql('SELECT weight_g, pieces FROM plate').select()) row['weight_g'] as int: row['pieces'] as int?});
 
-  /// Replaces the plate sizes the lifter owns with [plates].
+  /// Replaces the plates the lifter owns with [plates].
   void savePlates(Plates plates) => _inTransaction(_db, () {
     _sql('DELETE FROM plate').execute();
-    for (final grams in plates.sizes) {
-      _sql('INSERT INTO plate (weight_g) VALUES (?)').execute([grams]);
+    for (final MapEntry(key: grams, value: pieces) in plates.pieces.entries) {
+      _sql('INSERT INTO plate (weight_g, pieces) VALUES (?, ?)').execute([grams, pieces]);
     }
   });
 
@@ -352,7 +352,7 @@ void _configure(Database db) => db.execute('PRAGMA foreign_keys = ON; PRAGMA jou
 /// Append-only. Entry i moves the schema from user_version i to i + 1. A shipped entry is never edited; a change is a new entry. docs/schema.sql is generated from a database these build, and test/store_test.dart fails when the two differ.
 ///
 /// Comments that document the schema sit inside each statement, because SQLite keeps a statement's text in sqlite_master and drops anything between statements.
-const List<String> _migrations = [_v1, _v2, _v3, _v4, _v5];
+const List<String> _migrations = [_v1, _v2, _v3, _v4, _v5, _v6];
 
 const String _v1 = r'''
 CREATE TABLE exercise (
@@ -528,6 +528,24 @@ CREATE TABLE plate (
 INSERT INTO plate (weight_g) SELECT weight_g FROM plate_v4;
 
 DROP TABLE plate_v4;
+''';
+
+/// Brings back `plate.pieces`, now optional, by building the table again. [_v5] dropped the counts, so every size comes back not counted, standing for as many pieces as a lift needs.
+const String _v6 = r'''
+CREATE TEMP TABLE plate_v5 AS SELECT weight_g FROM plate;
+
+DROP TABLE plate;
+
+CREATE TABLE plate (
+  -- The plate sizes the lifter owns, for the panel's drawing of the plates on each side of a barbell and each end of an adjustable dumbbell. A size not owned has no row. The import never writes it.
+  weight_g INTEGER PRIMARY KEY CHECK (weight_g > 0),
+  -- How many pieces of this size the lifter owns, or NULL when they did not count it, which stands for as many as a lift needs.
+  pieces   INTEGER CHECK (pieces > 0)
+) STRICT, WITHOUT ROWID;
+
+INSERT INTO plate (weight_g) SELECT weight_g FROM plate_v5;
+
+DROP TABLE plate_v5;
 ''';
 
 /// Brings [db] to `_migrations.length`. Each step is one transaction that includes the user_version bump, and user_version lives in the database header, so it rolls back with the step. A crash mid-migration therefore leaves the old version, and the next launch reruns that step from the start.

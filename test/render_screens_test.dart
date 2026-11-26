@@ -36,8 +36,8 @@ void _expectCaptionFits(WidgetTester tester, {String? reason}) {
   expect(tester.getSize(line).width, lessThanOrEqualTo(tester.getSize(box).width), reason: reason);
 }
 
-/// The owner's plate sizes.
-const _homePlates = [500, 1000, 1250, 2000, 2500, 5000, 10000, 15000];
+/// The owner's plate sizes, not counted.
+const _homePlates = {500: null, 1000: null, 1250: null, 2000: null, 2500: null, 5000: null, 10000: null, 15000: null};
 
 void main() {
   final out = Platform.environment['SETLIST_RENDER_DIR'];
@@ -237,6 +237,31 @@ void main() {
       ),
     ));
     await shot(tester, '11-heavy-barbell');
+  }, skip: out == null);
+
+  testWidgets('render the plates dialog', (tester) async {
+    await tester.runAsync(_loadFonts);
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.8125;
+    addTearDown(tester.view.reset);
+    final store = Store.inMemory();
+    addTearDown(store.close);
+    store.savePlates(Plates({..._homePlates, 15000: 2}));
+    final squat = store.createExercise(name: 'Barbell Squat', kind: ExerciseKind.weightReps, equipment: const Barbell(20000));
+    store.saveDay(Workout(day: today, entries: [Slot(squat, [const SetEntry(grams: 60000, reps: 5)])]));
+    await tester.pumpWidget(RepaintBoundary(
+      key: boundary,
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: setlistTheme(Brightness.light),
+        home: WorkoutScreen(store: store, home: Home(day: today, alarm: _SilentAlarm(), restore: (_) {}, backup: DriveBackup(dbPath: '${Directory.systemTemp.path}/unlinked.sqlite', store: () => store)), day: today),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Show menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Your plates'));
+    await shot(tester, '12-plates-dialog');
   }, skip: out == null);
 
   testWidgets('render a superset day', (tester) async {
