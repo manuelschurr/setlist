@@ -829,47 +829,61 @@ void main() {
     });
 
     group('plates', () {
-      Plates sizes(List<num> kg) => Plates([for (final w in kg) (w * 1000).round()]);
-      final home = sizes([0.5, 1, 1.25, 2, 2.5, 5, 10, 15]);
+      Plates uncounted(List<num> kg) => Plates({for (final w in kg) (w * 1000).round(): null});
+      final home = uncounted([0.5, 1, 1.25, 2, 2.5, 5, 10, 15]);
       // A record compares a list field by identity, so a loading is checked field by field.
       List<Object?> parts(Loading? loading) => [loading?.lead, loading?.plates, loading?.onEach];
 
-      test('the fewest plates make a weight, heaviest first, as many of a size as it takes, and the heavier of equally few wins', () {
-        expect(home.make(2250), [1250, 1000]);
-        expect(home.make(3000), [2500, 500]);
-        expect(home.make(1750), [1250, 500]);
-        expect(home.make(4000), [2000, 2000]);
-        expect(home.make(20000), [15000, 5000]);
-        expect(home.make(60000), [15000, 15000, 15000, 15000]);
-        expect(home.make(500), [500]);
-        expect(home.make(0), isEmpty);
-        expect(sizes([0.5]).make(2000), [500, 500, 500, 500]);
+      test('without counts, the fewest plates make each end, heaviest first, as many of a size as it takes, and the heavier of equally few wins', () {
+        expect(home.forEachEnd(2250, ends: 4), [1250, 1000]);
+        expect(home.forEachEnd(3000, ends: 4), [2500, 500]);
+        expect(home.forEachEnd(1750, ends: 4), [1250, 500]);
+        expect(home.forEachEnd(4000, ends: 4), [2000, 2000]);
+        expect(home.forEachEnd(20000, ends: 2), [15000, 5000]);
+        expect(home.forEachEnd(60000, ends: 2), [15000, 15000, 15000, 15000]);
+        expect(home.forEachEnd(500, ends: 4), [500]);
+        expect(home.forEachEnd(0, ends: 4), isEmpty);
+        expect(uncounted([0.5]).forEachEnd(2000, ends: 4), [500, 500, 500, 500]);
+      });
+
+      test('a counted size gives each end at most its share of the pieces, and an uncounted one any number', () {
+        final fewSmall = Plates({1250: 2, 1000: 4, 500: 8});
+        expect(fewSmall.forEachEnd(2250, ends: 2), [1250, 1000]);
+        expect(fewSmall.forEachEnd(2250, ends: 4), isNull, reason: 'two 1.25s cannot go on four ends');
+        expect(fewSmall.forEachEnd(2000, ends: 4), [1000, 500, 500]);
+        expect(Plates({500: 4}).forEachEnd(1000, ends: 4), isNull);
+        expect(Plates({500: 8}).forEachEnd(1000, ends: 4), [500, 500]);
+        expect(Plates({15000: 2, 10000: null, 5000: null}).forEachEnd(40000, ends: 2), [15000, 10000, 10000, 5000]);
+        expect(Plates({15000: 2, 10000: null}).forEachEnd(30000, ends: 2), [10000, 10000, 10000]);
       });
 
       test('a weight no plates make is null', () {
-        expect(home.make(750), isNull);
-        expect(home.make(250), isNull);
-        expect(home.make(-500), isNull);
-        expect(sizes([2, 5]).make(3000), isNull);
-        expect(Plates.none.make(1000), isNull);
-        expect(Plates.none.make(0), isEmpty);
+        expect(home.forEachEnd(750, ends: 4), isNull);
+        expect(home.forEachEnd(250, ends: 2), isNull);
+        expect(home.forEachEnd(-500, ends: 2), isNull);
+        expect(uncounted([2, 5]).forEachEnd(3000, ends: 2), isNull);
+        expect(Plates({15000: 2}).forEachEnd(30000, ends: 2), isNull);
+        expect(Plates.none.forEachEnd(1000, ends: 2), isNull);
+        expect(Plates.none.forEachEnd(0, ends: 2), isEmpty);
       });
 
-      test('the best answer matches an exhaustive search for every weight up to 40 kg', () {
+      test('the best answer matches an exhaustive search for every end up to 30 kg, with some sizes counted', () {
+        final mixed = Plates({500: 4, 1000: null, 1250: 4, 2000: 4, 2500: null, 5000: 4, 10000: 2, 15000: 2});
+        final usable = [for (final e in mixed.pieces.entries) (e.key, e.value == null ? 1 << 20 : e.value! ~/ 2)];
         int? brute(int grams, [int i = 0]) {
           if (grams == 0) return 0;
-          if (i == home.sizes.length) return null;
-          final w = home.sizes[i];
+          if (i == usable.length) return null;
+          final (w, n) = usable[i];
           int? best;
-          for (var k = 0; k * w <= grams; k++) {
+          for (var k = 0; k <= n && k * w <= grams; k++) {
             final rest = brute(grams - k * w, i + 1);
             if (rest != null && (best == null || rest + k < best)) best = rest + k;
           }
           return best;
         }
 
-        for (var grams = 0; grams <= 40000; grams += 250) {
-          final plates = home.make(grams);
+        for (var grams = 0; grams <= 30000; grams += 250) {
+          final plates = mixed.forEachEnd(grams, ends: 2);
           expect(plates?.length, brute(grams), reason: '$grams g');
           if (plates != null) {
             expect(plates.fold(0, (a, b) => a + b), grams, reason: '$grams g');
@@ -878,14 +892,16 @@ void main() {
         }
       });
 
-      test('keeps each size once, heaviest first, refuses a size of 0 or less, and compares by content', () {
-        expect(Plates([500, 1000, 500]).sizes, [1000, 500]);
-        expect(() => Plates([0]), throwsArgumentError);
-        expect(() => Plates([500, -1000]), throwsArgumentError);
-        expect(Plates([500, 1000]), Plates([1000, 500]));
-        expect(Plates([500]), isNot(Plates([500, 1000])));
-        expect(Plates([]), Plates.none);
-        expect(Plates([]).isEmpty, isTrue);
+      test('refuses a size of 0 or less or a count below 1, sorts heaviest first, and compares by content, counts included', () {
+        expect(() => Plates({0: null}), throwsArgumentError);
+        expect(() => Plates({500: 0}), throwsArgumentError);
+        expect(() => Plates({500: -1}), throwsArgumentError);
+        expect(Plates({500: 2, 1000: null}), Plates({1000: null, 500: 2}));
+        expect(Plates({500: 2}), isNot(Plates({500: null})));
+        expect(Plates({500: null}), isNot(Plates({1000: null})));
+        expect(Plates({}), Plates.none);
+        expect(Plates({}).isEmpty, isTrue);
+        expect(Plates({500: 2, 1000: null}).pieces.keys, [1000, 500]);
       });
 
       test('an adjustable dumbbell names the plates for each end, after what a fixed one would say', () {
@@ -898,6 +914,8 @@ void main() {
         expect(parts(one.loading(7000, home)), [null, [1250, 1000], 'end']);
         expect(one.loading(32500, home)?.plates, [15000]);
         expect(one.loading(62500, home)?.plates, [15000, 15000]);
+        expect(pair.loading(14000, Plates({1250: 2, 1000: 4}))?.plates, isNull, reason: 'two 1.25s cannot go on four ends');
+        expect(one.loading(7000, Plates({1250: 2, 1000: 4}))?.plates, [1250, 1000]);
       });
 
       test('a barbell names the plates for each side after the bar', () {
@@ -905,6 +923,7 @@ void main() {
         expect(parts(squat.loading(60000, home)), ['20 kg bar', [15000, 5000], 'side']);
         expect(squat.loading(102500, home)?.plates, [15000, 15000, 10000, 1250]);
         expect(squat.loading(21000, home)?.plates, [500]);
+        expect(squat.loading(80000, Plates({15000: 2, 10000: null}))?.plates, [10000, 10000, 10000], reason: 'one 15 on each side leaves 15 that only 10s cannot make');
         expect(parts(const Barbell(7500).loading(27500, home)), ['7.5 kg bar', [10000], 'side']);
       });
 
@@ -915,7 +934,7 @@ void main() {
         expect(pair.loading(14250, home)?.lead, isNotNull);
         expect(parts(const OneDumbbell(handleGrams: 2500).loading(4000, home)), [null, null, 'end']);
         expect(parts(const Barbell(20000).loading(20500, home)), ['20 kg bar', null, 'side']);
-        expect(parts(const Barbell(20000).loading(25000, sizes([2]))), ['20 kg bar', null, 'side']);
+        expect(parts(const Barbell(20000).loading(25000, uncounted([2]))), ['20 kg bar', null, 'side']);
       });
 
       test('there is no loading at or below the bar or the handle, at 0 kg, without a handle or plates, or without equipment', () {

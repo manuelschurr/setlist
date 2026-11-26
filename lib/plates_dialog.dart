@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import 'day.dart';
 import 'store.dart';
 
-/// Edits the plate sizes the lifter owns and saves them through [Store.savePlates]. Returns the saved plates, or null on Cancel.
+/// Edits the plates the lifter owns and saves them through [Store.savePlates]. Returns the saved plates, or null on Cancel.
 Future<Plates?> editPlates(BuildContext context, Store store) => showDialog<Plates>(context: context, builder: (_) => _PlatesDialog(store: store));
 
-/// Offered even when not owned, so a usual set is entered by taps alone.
+/// Offered even when not owned, so a usual set is entered by ticks alone.
 const _usualGrams = [500, 1000, 1250, 2000, 2500, 5000, 10000, 15000, 20000, 25000];
 
 class _PlatesDialog extends StatefulWidget {
@@ -19,37 +19,56 @@ class _PlatesDialog extends StatefulWidget {
 }
 
 class _PlatesDialogState extends State<_PlatesDialog> {
-  late final Set<int> _owned = {...widget.store.loadPlates().sizes};
+  late final Plates _saved = widget.store.loadPlates();
+  late final Set<int> _owned = {..._saved.pieces.keys};
 
-  /// Every size offered, lightest first.
-  late final List<int> _sizes = {..._usualGrams, ..._owned}.toList()..sort();
+  /// One optional count per size, lightest first.
+  late final Map<int, TextEditingController> _counts = {
+    for (final grams in {..._usualGrams, ..._saved.pieces.keys}.toList()..sort()) grams: TextEditingController(text: _saved.pieces[grams]?.toString() ?? ''),
+  };
 
   final _newSize = TextEditingController();
   String? _newSizeError;
+  final Set<int> _badCounts = {};
 
   @override
   void dispose() {
-    _newSize.dispose();
+    for (final c in [..._counts.values, _newSize]) {
+      c.dispose();
+    }
     super.dispose();
   }
+
+  void _toggle(int grams) => setState(() => _owned.contains(grams) ? _owned.remove(grams) : _owned.add(grams));
 
   void _addSize() {
     final grams = Field.weight.parse(_newSize.text);
     setState(() {
       _newSizeError = grams == null || grams <= 0 ? 'Type a weight above 0, such as 0.75' : null;
       if (grams == null || grams <= 0) return;
-      if (!_sizes.contains(grams)) {
-        _sizes
-          ..add(grams)
-          ..sort();
-      }
+      _counts.putIfAbsent(grams, TextEditingController.new);
+      final sorted = _counts.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+      _counts
+        ..clear()
+        ..addEntries(sorted);
       _owned.add(grams);
       _newSize.clear();
     });
   }
 
+  /// A ticked size with an empty count stands for as many as a lift needs, and a count of 0 means not owned.
   void _save() {
-    final plates = Plates(_owned);
+    final counts = {for (final grams in _owned) grams: _counts[grams]!.text.trim()};
+    setState(() {
+      _badCounts
+        ..clear()
+        ..addAll([for (final MapEntry(key: grams, value: text) in counts.entries) if (text.isNotEmpty && (int.tryParse(text) ?? -1) < 0) grams]);
+    });
+    if (_badCounts.isNotEmpty) return;
+    final plates = Plates({
+      for (final MapEntry(key: grams, value: text) in counts.entries)
+        if (text != '0') grams: text.isEmpty ? null : int.parse(text),
+    });
     widget.store.savePlates(plates);
     Navigator.pop(context, plates);
   }
@@ -64,21 +83,31 @@ class _PlatesDialogState extends State<_PlatesDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Tap the sizes you own. Barbells and adjustable dumbbells then show which plates to load.', style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              for (final grams in _sizes)
-                FilterChip(
-                  key: ValueKey('plates $grams'),
-                  label: Text('${Field.weight.format(grams)} kg'),
-                  selected: _owned.contains(grams),
-                  onSelected: (owned) => setState(() => owned ? _owned.add(grams) : _owned.remove(grams)),
-                ),
-            ],
-          ),
+          Text('Tick the plates you own, and count only those you could run short of. Barbells and adjustable dumbbells then show which plates to load.', style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          const SizedBox(height: 8),
+          for (final MapEntry(key: grams, value: controller) in _counts.entries)
+            InkWell(
+              onTap: () => _toggle(grams),
+              child: Row(
+                children: [
+                  Checkbox(key: ValueKey('plates $grams'), value: _owned.contains(grams), onChanged: (_) => _toggle(grams)),
+                  Expanded(child: Text('${Field.weight.format(grams)} kg', style: theme.textTheme.bodyLarge)),
+                  SizedBox(
+                    width: 88,
+                    child: TextField(
+                      key: ValueKey('plate count $grams'),
+                      controller: controller,
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.end,
+                      decoration: InputDecoration(hintText: _owned.contains(grams) ? 'any' : null, suffixText: 'pcs', isDense: true, errorText: _badCounts.contains(grams) ? 'Whole number' : null),
+                      onChanged: (text) {
+                        if (text.trim().isNotEmpty && !_owned.contains(grams)) setState(() => _owned.add(grams));
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
           const SizedBox(height: 8),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,

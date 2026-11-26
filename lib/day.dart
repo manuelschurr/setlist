@@ -197,7 +197,7 @@ sealed class Equipment {
   /// The panel's line under the weight for the logged total [grams]. Null exactly for equipment that never splits a total, whatever [grams] is. An empty string for a total of 0 or less.
   String? breakdown(int grams);
 
-  /// The plates that go on each side of a barbell or each end of an adjustable dumbbell for the logged total [grams], from the sizes the lifter owns: the fewest that make it, and among equally few the heavier. Null where [breakdown] says it all: on equipment that takes no plates, without plates owned, and at or below the bar or the handle.
+  /// The plates that go on each side of a barbell or each end of an adjustable dumbbell for the logged total [grams], from the plates the lifter owns: the fewest that make it, and among equally few the heavier. Null where [breakdown] says it all: on equipment that takes no plates, without plates owned, and at or below the bar or the handle.
   Loading? loading(int grams, Plates plates) => null;
 }
 
@@ -244,7 +244,7 @@ final class Barbell extends Equipment {
   Loading? loading(int grams, Plates plates) {
     final loaded = grams - barGrams;
     if (plates.isEmpty || loaded <= 0) return null;
-    return (lead: '${Field.weight.format(barGrams)} kg bar', plates: loaded.isOdd ? null : plates.make(loaded ~/ 2), onEach: 'side');
+    return (lead: '${Field.weight.format(barGrams)} kg bar', plates: loaded.isOdd ? null : plates.forEachEnd(loaded ~/ 2, ends: 2), onEach: 'side');
   }
 
   @override
@@ -260,6 +260,9 @@ sealed class Dumbbell extends Equipment {
 
   final int? handleGrams;
 
+  /// How many ends carry the same plates: two on one dumbbell, four on a pair.
+  int get _ends;
+
   /// The grams of one dumbbell for the logged total [grams].
   int _oneOf(int grams);
 
@@ -273,7 +276,7 @@ sealed class Dumbbell extends Equipment {
     if (handle == null || plates.isEmpty || grams <= 0) return null;
     final loaded = _oneOf(grams) - handle;
     if (loaded <= 0) return null;
-    return (lead: _each(grams), plates: loaded.isOdd ? null : plates.make(loaded ~/ 2), onEach: 'end');
+    return (lead: _each(grams), plates: loaded.isOdd ? null : plates.forEachEnd(loaded ~/ 2, ends: _ends), onEach: 'end');
   }
 
   @override
@@ -294,6 +297,9 @@ String _onHandle(int grams, int handle, String handles, String Function(String p
 /// Two dumbbells of the same weight, logged as their sum: hammer curls at 12 kg are two 6 kg dumbbells.
 final class DumbbellPair extends Dumbbell {
   const DumbbellPair({super.handleGrams});
+
+  @override
+  int get _ends => 4;
 
   @override
   int _oneOf(int grams) => _half(grams);
@@ -320,6 +326,9 @@ final class OneDumbbell extends Dumbbell {
   const OneDumbbell({super.handleGrams});
 
   @override
+  int get _ends => 2;
+
+  @override
   int _oneOf(int grams) => grams;
 
   @override
@@ -342,54 +351,70 @@ final class OneDumbbell extends Dumbbell {
 
 int _half(int grams) => grams ~/ 2;
 
-/// The plate sizes the lifter owns, in grams. Each counts as many pieces as a lift needs, so the lifter never counts them.
+/// The plate sizes the lifter owns, in grams, each with how many pieces they own, or null for a size they did not count, which then stands for as many as a lift needs. So a lifter counts only the sizes that run short, such as their heaviest.
 final class Plates {
-  /// Keeps each size once. Throws [ArgumentError] for a size of 0 or less.
-  factory Plates(Iterable<int> sizes) {
-    if (sizes.any((grams) => grams <= 0)) throw ArgumentError.value(sizes, 'sizes', 'needs sizes above 0');
-    return Plates._(List.unmodifiable(sizes.toSet().toList()..sort((a, b) => b.compareTo(a))));
+  /// Throws [ArgumentError] for a size of 0 or less or a count below 1.
+  factory Plates(Map<int, int?> pieces) {
+    if (pieces.entries.any((e) => e.key <= 0 || (e.value ?? 1) < 1)) throw ArgumentError.value(pieces, 'pieces', 'needs sizes above 0 and counts above 0 or none');
+    return Plates._(Map.unmodifiable(Map.fromEntries(pieces.entries.toList()..sort((a, b) => b.key.compareTo(a.key)))));
   }
 
-  const Plates._(this.sizes);
+  const Plates._(this.pieces);
 
-  static const none = Plates._([]);
+  static const none = Plates._({});
 
-  /// Heaviest first, each once.
-  final List<int> sizes;
+  /// Heaviest first. A count is above 0, or null for a size not counted.
+  final Map<int, int?> pieces;
 
-  bool get isEmpty => sizes.isEmpty;
+  bool get isEmpty => pieces.isEmpty;
 
-  /// The fewest plates that make [grams], heaviest first. Among equally few, the one with more heavy plates wins. Empty for 0 grams, and null when these sizes cannot make [grams].
-  List<int>? make(int grams) {
+  /// The fewest plates that make [grams] on one end, heaviest first, when [ends] ends must all carry the same plates, so each end gets at most a [ends]th of the pieces of a counted size and any number of one not counted. Among equally few, the one with more heavy plates wins. Empty for 0 grams, and null when the plates owned cannot make [grams].
+  List<int>? forEachEnd(int grams, {required int ends}) {
     if (grams < 0) return null;
-    if (grams == 0) return const [];
-    final unit = sizes.fold(grams, (g, size) => g.gcd(size));
-    final units = [for (final size in sizes) size ~/ unit];
+    final usable = [
+      for (final MapEntry(key: weight, value: count) in pieces.entries)
+        if ((count == null ? grams ~/ weight : count ~/ ends) case final n when n > 0) (weight: weight, count: n),
+    ];
+    final unit = usable.fold(grams, (g, p) => g.gcd(p.weight));
+    if (unit == 0) return const [];
+    if (grams % unit != 0 || usable.fold(0, (sum, p) => sum + p.weight * p.count) < grams) return null;
     final target = grams ~/ unit;
     const impossible = 1 << 30;
-    // fewest[s]: the fewest plates that make s units.
-    final fewest = List.filled(target + 1, impossible)..[0] = 0;
-    for (var s = 1; s <= target; s++) {
-      for (final w in units) {
-        if (w <= s && fewest[s - w] + 1 < fewest[s]) fewest[s] = fewest[s - w] + 1;
+    // fewest[i][s]: the fewest plates that make s units from usable[i] onwards.
+    final fewest = List.generate(usable.length + 1, (i) => List.filled(target + 1, impossible));
+    fewest[usable.length][0] = 0;
+    for (var i = usable.length - 1; i >= 0; i--) {
+      final (:weight, :count) = usable[i];
+      final w = weight ~/ unit;
+      for (var s = 0; s <= target; s++) {
+        for (var k = 0; k <= count && k * w <= s; k++) {
+          final rest = fewest[i + 1][s - k * w];
+          if (rest + k < fewest[i][s]) fewest[i][s] = rest + k;
+        }
       }
     }
-    if (fewest[target] == impossible) return null;
-    // Taking the heaviest plate that still leaves a best answer, again and again, picks the most heavy plates among the fewest.
+    if (fewest[0][target] == impossible) return null;
+    // From the heaviest size, taking as many as still reach the fewest picks the most heavy plates among the fewest.
     final chosen = <int>[];
-    for (var s = target; s > 0;) {
-      final i = units.indexWhere((w) => w <= s && fewest[s - w] == fewest[s] - 1);
-      chosen.add(sizes[i]);
-      s -= units[i];
+    var s = target;
+    for (final (i, (:weight, :count)) in usable.indexed) {
+      final w = weight ~/ unit;
+      for (var k = count < s ~/ w ? count : s ~/ w; k >= 0; k--) {
+        if (fewest[i + 1][s - k * w] + k == fewest[i][s]) {
+          chosen.addAll(List.filled(k, weight));
+          s -= k * w;
+          break;
+        }
+      }
     }
     return chosen;
   }
 
   @override
-  bool operator ==(Object other) => other is Plates && other.sizes.length == sizes.length && sizes.indexed.every((e) => other.sizes[e.$1] == e.$2);
+  bool operator ==(Object other) => other is Plates && other.pieces.length == pieces.length && pieces.entries.every((e) => other.pieces.containsKey(e.key) && other.pieces[e.key] == e.value);
 
   @override
-  int get hashCode => Object.hashAll(sizes);
+  int get hashCode => Object.hashAll([for (final e in pieces.entries) Object.hash(e.key, e.value)]);
 }
 
 /// An exercise as a day sees it. A [Slot] holds a copy; the exercise table in the store owns the original, and [UpdateExercise] refreshes the copy after an edit.
