@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:setlist/day.dart';
 import 'package:setlist/drive_backup.dart';
 import 'package:setlist/main.dart';
+import 'package:setlist/plate_strip.dart';
 import 'package:setlist/rest_alarm.dart';
 import 'package:setlist/store.dart';
 import 'package:setlist/workout_screen.dart';
@@ -365,11 +366,155 @@ void main() {
     expect(storedEquipment(squat), Equipment.none);
   });
 
+  testWidgets('editing gives dumbbells a handle that splits the panel line, switching to one dumbbell keeps it, and clearing it makes them fixed', (tester) async {
+    store.saveDay(Workout(day: today, entries: [Slot(bench, sets(1, 14, 10))]));
+    await openToday(tester);
+    await openEdit(tester, 'Bench press');
+    expect(find.widgetWithText(TextField, 'Handle weight (optional)'), findsNothing);
+    await chooseEquipment(tester, 'Two dumbbells');
+    final handle = find.widgetWithText(TextField, 'Handle weight (optional)');
+    expect(tester.widget<TextField>(handle).controller!.text, '');
+    await tester.enterText(handle, '2.5');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(storedEquipment(bench), const DumbbellPair(handleGrams: 2500));
+    expect(inPanel(find.text('7 kg each (4.5 + 2.5 kg)')), findsOneWidget);
+
+    await openEdit(tester, 'Bench press');
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Handle weight (optional)')).controller!.text, '2.5');
+    await chooseEquipment(tester, 'One dumbbell');
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Handle weight (optional)')).controller!.text, '2.5');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(storedEquipment(bench), const OneDumbbell(handleGrams: 2500));
+    expect(inPanel(find.text('11.5 kg + 2.5 kg handle')), findsOneWidget);
+
+    await openEdit(tester, 'Bench press');
+    await tester.enterText(find.widgetWithText(TextField, 'Handle weight (optional)'), '');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(storedEquipment(bench), Equipment.oneDumbbell);
+    expect(inPanel(find.textContaining('handle')), findsNothing);
+  });
+
+  testWidgets('a handle weight of 0 or not a number keeps the dialog open with the error', (tester) async {
+    store.saveDay(Workout(day: today, entries: [Slot(bench, sets(1, 14, 10))]));
+    await openToday(tester);
+    await openEdit(tester, 'Bench press');
+    await chooseEquipment(tester, 'Two dumbbells');
+    for (final typed in ['0', 'abc']) {
+      await tester.enterText(find.widgetWithText(TextField, 'Handle weight (optional)'), typed);
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(find.text('Type a handle weight above 0, or leave it empty'), findsOneWidget, reason: typed);
+      expect(find.text('Edit exercise'), findsOneWidget, reason: typed);
+    }
+    expect(storedEquipment(bench), Equipment.none);
+  });
+
   Exercise withEquipment(Exercise e, Equipment equipment) {
     final changed = Exercise(id: e.id, name: e.name, kind: e.kind, equipment: equipment, category: e.category, weightStepGrams: e.weightStepGrams, rest: e.rest);
     store.updateExercise(changed);
     return changed;
   }
+
+  testWidgets('one adjustable dumbbell keeps its line at 0 kg, so the panel keeps its height', (tester) async {
+    row = withEquipment(row, const OneDumbbell(handleGrams: 2500));
+    store.saveDay(Workout(day: today, entries: [Slot(row, [kg(7, 10), kg(0, 10)])]));
+    await openToday(tester);
+    expect(inPanel(find.text('4.5 kg + 2.5 kg handle')), findsOneWidget);
+    final panelAt7 = tester.getRect(panel);
+    final repsAt7 = tester.getRect(inPanel(find.byTooltip('Decrease reps')));
+
+    await tester.tap(find.text('0 kg × 10'));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(panel), panelAt7);
+    expect(tester.getRect(inPanel(find.byTooltip('Decrease reps'))), repsAt7);
+  });
+
+  Future<void> openPlates(WidgetTester tester) async {
+    await tester.tap(find.byTooltip('Show menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Your plates'));
+    await tester.pumpAndSettle();
+  }
+
+  Finder plateCount(num kg) => find.byKey(ValueKey('plates ${(kg * 1000).round()}'));
+
+  testWidgets('entering plates draws the plates for each end under an adjustable pair, and the dialog shows them again', (tester) async {
+    final semantics = tester.ensureSemantics();
+    bench = withEquipment(bench, const DumbbellPair(handleGrams: 2500));
+    store.saveDay(Workout(day: today, entries: [Slot(bench, sets(1, 14, 10))]));
+    await openToday(tester);
+    expect(inPanel(find.text('7 kg each (4.5 + 2.5 kg)')), findsOneWidget);
+    expect(inPanel(find.byType(PlateStrip)), findsNothing);
+
+    await openPlates(tester);
+    expect(plateCount(15), findsOneWidget, reason: 'usual sizes are offered before any is owned');
+    await tester.enterText(plateCount(1.25), '4');
+    await tester.enterText(plateCount(1), '4');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(store.loadPlates(), Plates({1250: 4, 1000: 4}));
+    expect(inPanel(find.text('7 kg each')), findsOneWidget);
+    expect(tester.widget<PlateStrip>(inPanel(find.byType(PlateStrip))).plates, [1250, 1000]);
+    expect(find.bySemanticsLabel(RegExp(r'weight 14 kg, 7 kg each, 1\.25 \+ 1 kg on each end, tap to type')), findsOneWidget);
+
+    await tester.tap(inPanel(find.byTooltip('Increase weight')));
+    await tester.pump();
+    expect(inPanel(find.byType(PlateStrip)), findsNothing);
+    expect(inPanel(find.textContaining(RegExp(r'^[\d.]+ kg each · not with your plates$'), findRichText: true)), findsOneWidget);
+
+    await openPlates(tester);
+    expect(tester.widget<TextField>(plateCount(1.25)).controller!.text, '4');
+    expect(tester.widget<TextField>(plateCount(2)).controller!.text, '');
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+    expect(store.loadPlates(), Plates({1250: 4, 1000: 4}));
+    semantics.dispose();
+  });
+
+  testWidgets('a count that is not a whole number keeps the plates dialog open, and another size joins the list', (tester) async {
+    store.saveDay(Workout(day: today, entries: [Slot(bench, sets(1, 14, 10))]));
+    await openToday(tester);
+    await openPlates(tester);
+    await tester.enterText(plateCount(2.5), '2.5');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Whole number'), findsOneWidget);
+    expect(find.text('Your plates'), findsOneWidget);
+
+    await tester.enterText(plateCount(2.5), '');
+    await tester.enterText(find.widgetWithText(TextField, 'Another size'), '0.75');
+    await tester.ensureVisible(find.byTooltip('Add size'));
+    await tester.tap(find.byTooltip('Add size'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, '0.75'), findsNothing, reason: 'the size field empties once added');
+    await tester.enterText(plateCount(0.75), '2');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(store.loadPlates(), Plates({750: 2}));
+
+    await openPlates(tester);
+    expect(tester.widget<TextField>(plateCount(0.75)).controller!.text, '2');
+  });
+
+  testWidgets("with plates, an adjustable pair keeps the panel's height from its plates down to 0 kg", (tester) async {
+    store.savePlates(Plates({1250: 4, 1000: 4}));
+    bench = withEquipment(bench, const DumbbellPair(handleGrams: 2500));
+    store.saveDay(Workout(day: today, entries: [Slot(bench, [kg(14, 10), kg(5, 10), kg(0, 10)])]));
+    await openToday(tester);
+    expect(inPanel(find.byType(PlateStrip)), findsOneWidget);
+    final panelAt14 = tester.getRect(panel);
+    final repsAt14 = tester.getRect(inPanel(find.byTooltip('Decrease reps')));
+
+    for (final row in ['5 kg × 10', '0 kg × 10']) {
+      await tester.tap(find.text(row));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(panel), panelAt14, reason: row);
+      expect(tester.getRect(inPanel(find.byTooltip('Decrease reps'))), repsAt14, reason: row);
+    }
+  });
 
   testWidgets('a barbell marks its rows and splits the total under the weight in the panel', (tester) async {
     final semantics = tester.ensureSemantics();
@@ -411,18 +556,17 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('the caption keeps its line at 0 kg and the button rows stay level', (tester) async {
+  testWidgets('the caption keeps its line at 0 kg, so the panel keeps its height', (tester) async {
     bench = withEquipment(bench, Equipment.dumbbellPair);
     store.saveDay(Workout(day: today, entries: [Slot(bench, [kg(12, 10), kg(0, 10)])]));
     await openToday(tester);
-    Rect rect(String tooltip) => tester.getRect(inPanel(find.byTooltip(tooltip)));
-    final panelAt12 = tester.getSize(panel);
-    expect(rect('Decrease weight').top, rect('Decrease reps').top);
+    final panelAt12 = tester.getRect(panel);
+    final repsAt12 = tester.getRect(inPanel(find.byTooltip('Decrease reps')));
 
     await tester.tap(find.text('0 kg × 10'));
     await tester.pumpAndSettle();
-    expect(tester.getSize(panel), panelAt12);
-    expect(rect('Decrease weight').top, rect('Decrease reps').top);
+    expect(tester.getRect(panel), panelAt12);
+    expect(tester.getRect(inPanel(find.byTooltip('Decrease reps'))), repsAt12);
   });
 
   testWidgets('choosing equipment in the edit dialog marks the open day at once', (tester) async {
@@ -530,7 +674,9 @@ void main() {
     expect(cardOrder(tester, ['Squat', 'Bench press', 'Row', 'Curl']), ['Bench press', 'Squat', 'Row', 'Curl']);
     expect(at('Squat').left, at('Bench press').left, reason: 'the dropped card is framed like the others');
 
+    debugPrint('DBG list ${tester.getRect(find.byType(Scrollable).first)} panel ${tester.getRect(panel)} bench ${at('Bench press')} row ${at('Row')} squat ${at('Squat')} strip ${tester.getRect(find.text('Superset'))}');
     await drag(tester, handle('Row'), () => at('Bench press').top - at('Row').top);
+    debugPrint('DBG after ${savedLayout()}');
     expect(savedLayout(), [['Row', 'Bench press', 'Squat'], ['Curl']]);
 
     await drag(tester, handle('Squat'), () => at('Curl').top - at('Squat').bottom);

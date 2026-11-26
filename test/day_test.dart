@@ -796,7 +796,139 @@ void main() {
       }
     });
 
-    test('no equipment and one dumbbell never have a line, whatever the total', () {
+    test('an adjustable pair splits each dumbbell into its plates and the handle', () {
+      const pair = DumbbellPair(handleGrams: 2500);
+      expect(pair.breakdown(14000), '7 kg each (4.5 + 2.5 kg)');
+      expect(pair.breakdown(47000), '23.5 kg each (21 + 2.5 kg)');
+      expect(pair.breakdown(14250), '7.13 kg each (4.63 + 2.5 kg)');
+      expect(pair.breakdown(5000), 'just the 2.5 kg handles');
+      expect(pair.breakdown(4000), 'less than the 2.5 kg handles');
+      expect(const DumbbellPair(handleGrams: 2000).breakdown(12000), '6 kg each (4 + 2 kg)');
+    });
+
+    test('one adjustable dumbbell splits into its plates and the handle', () {
+      const one = OneDumbbell(handleGrams: 2500);
+      expect(one.breakdown(7000), '4.5 kg + 2.5 kg handle');
+      expect(one.breakdown(2500), 'just the 2.5 kg handle');
+      expect(one.breakdown(2000), 'less than the 2.5 kg handle');
+    });
+
+    test('a total of 0 or less keeps the line of an adjustable dumbbell but leaves it blank', () {
+      for (final grams in [0, -5000]) {
+        expect(const DumbbellPair(handleGrams: 2500).breakdown(grams), '', reason: '$grams g');
+        expect(const OneDumbbell(handleGrams: 2500).breakdown(grams), '', reason: '$grams g');
+      }
+    });
+
+    test('the handle is part of the equipment, and a pair and one dumbbell on the same handle differ', () {
+      expect(const DumbbellPair(handleGrams: 2500), const DumbbellPair(handleGrams: 2500));
+      expect(const DumbbellPair(handleGrams: 2500), isNot(Equipment.dumbbellPair));
+      expect(const DumbbellPair(handleGrams: 2500), isNot(const DumbbellPair(handleGrams: 2000)));
+      expect(const DumbbellPair(handleGrams: 2500), isNot(const OneDumbbell(handleGrams: 2500)));
+      expect(Equipment.dumbbellPair, isNot(Equipment.oneDumbbell));
+    });
+
+    group('plates', () {
+      Plates four(List<num> kg) => Plates({for (final w in kg) (w * 1000).round(): 4});
+      final home = four([0.5, 1, 1.25, 2, 2.5, 5, 10, 15]);
+
+      test('the fewest plates make each end, heaviest first, and the heavier of equally few wins', () {
+        expect(home.forEachEnd(2250, ends: 4), [1250, 1000]);
+        expect(home.forEachEnd(3000, ends: 4), [2500, 500]);
+        expect(home.forEachEnd(1750, ends: 4), [1250, 500]);
+        expect(home.forEachEnd(20000, ends: 2), [15000, 5000]);
+        expect(home.forEachEnd(500, ends: 4), [500]);
+        expect(home.forEachEnd(0, ends: 4), isEmpty);
+      });
+
+      test('an end gets at most its share of the pieces of a weight', () {
+        final fewSmall = Plates({1250: 2, 1000: 4, 500: 8});
+        expect(fewSmall.forEachEnd(2250, ends: 2), [1250, 1000]);
+        expect(fewSmall.forEachEnd(2250, ends: 4), isNull, reason: 'two 1.25s cannot go on four ends');
+        expect(fewSmall.forEachEnd(2000, ends: 4), [1000, 500, 500]);
+        expect(Plates({500: 4}).forEachEnd(1000, ends: 4), isNull);
+        expect(Plates({500: 8}).forEachEnd(1000, ends: 4), [500, 500]);
+      });
+
+      test('a weight no plates make is null', () {
+        expect(home.forEachEnd(750, ends: 4), isNull);
+        expect(home.forEachEnd(250, ends: 2), isNull);
+        expect(home.forEachEnd(-500, ends: 2), isNull);
+        expect(home.forEachEnd(200000, ends: 4), isNull);
+        expect(Plates.none.forEachEnd(1000, ends: 2), isNull);
+        expect(Plates.none.forEachEnd(0, ends: 2), isEmpty);
+      });
+
+      test('the best answer matches an exhaustive search for every end up to 30 kg', () {
+        final limited = Plates({500: 4, 1000: 4, 1250: 4, 2000: 4, 2500: 4, 5000: 4, 10000: 2, 15000: 2});
+        final usable = [for (final e in limited.pieces.entries) (e.key, e.value ~/ 2)];
+        int? brute(int grams, [int i = 0]) {
+          if (grams == 0) return 0;
+          if (i == usable.length) return null;
+          final (w, n) = usable[i];
+          int? best;
+          for (var k = 0; k <= n && k * w <= grams; k++) {
+            final rest = brute(grams - k * w, i + 1);
+            if (rest != null && (best == null || rest + k < best)) best = rest + k;
+          }
+          return best;
+        }
+
+        for (var grams = 0; grams <= 30000; grams += 250) {
+          final plates = limited.forEachEnd(grams, ends: 2);
+          expect(plates?.length, brute(grams), reason: '$grams g');
+          if (plates != null) expect(plates.fold(0, (a, b) => a + b), grams, reason: '$grams g');
+        }
+      });
+
+      test('drops weights with no pieces, refuses a weight of 0 or a negative count, and compares by content', () {
+        expect(Plates({1000: 0, 500: 2}).pieces, {500: 2});
+        expect(Plates({1000: 0}).isEmpty, isTrue);
+        expect(() => Plates({0: 2}), throwsArgumentError);
+        expect(() => Plates({500: -1}), throwsArgumentError);
+        expect(Plates({500: 2, 1000: 4}), Plates({1000: 4, 500: 2}));
+        expect(Plates({500: 2}), isNot(Plates({500: 4})));
+        expect(Plates({}), Plates.none);
+        expect(Plates({500: 2, 1000: 4}).pieces.keys, [1000, 500]);
+      });
+
+      test('an adjustable dumbbell names the plates for each end, after what a fixed one would say', () {
+        const pair = DumbbellPair(handleGrams: 2500);
+        const one = OneDumbbell(handleGrams: 2500);
+        expect(pair.loading(14000, home)?.plates, [1250, 1000]);
+        expect(pair.loading(14000, home)?.each, '7 kg each');
+        expect(pair.loading(15000, home)?.plates, [2500]);
+        expect(pair.loading(47000, home)?.plates, [10000, 500]);
+        expect(one.loading(7000, home)?.plates, [1250, 1000]);
+        expect(one.loading(7000, home)?.each, isNull, reason: 'one dumbbell weighs its total');
+        expect(one.loading(32500, home)?.plates, [15000]);
+      });
+
+      test("a total the plates can't make keeps what a fixed dumbbell would say and has no plates", () {
+        const pair = DumbbellPair(handleGrams: 2500);
+        for (final (grams, plates) in [(8000, home), (14250, home), (14000, Plates({1250: 2, 1000: 4}))]) {
+          final loading = pair.loading(grams, plates);
+          expect(loading, isNotNull, reason: '$grams g');
+          expect(loading!.plates, isNull, reason: '$grams g');
+          expect(loading.each, pair.loading(grams, home)!.each, reason: '$grams g');
+        }
+        expect(Plates({1250: 2, 1000: 4}).forEachEnd(2250, ends: 4), isNull);
+      });
+
+      test('there is no loading at or below the handle, at 0 kg, or without a handle or plates', () {
+        for (final grams in [5000, 4000, 0, -2000]) {
+          expect(const DumbbellPair(handleGrams: 2500).loading(grams, home), isNull, reason: '$grams g');
+          expect(const OneDumbbell(handleGrams: 2500).loading(grams ~/ 2, home), isNull, reason: '$grams g');
+        }
+        for (final grams in [-5000, 0, 14000]) {
+          expect(Equipment.dumbbellPair.loading(grams, home), isNull, reason: '$grams g');
+          expect(Equipment.oneDumbbell.loading(grams, home), isNull, reason: '$grams g');
+          expect(const DumbbellPair(handleGrams: 2500).loading(grams, Plates.none), isNull, reason: '$grams g');
+        }
+      });
+    });
+
+    test('no equipment and one fixed dumbbell never have a line, whatever the total', () {
       for (final grams in [-5000, 0, 6000, 100000]) {
         expect(Equipment.none.breakdown(grams), isNull, reason: '$grams g');
         expect(Equipment.oneDumbbell.breakdown(grams), isNull, reason: '$grams g');
@@ -816,14 +948,18 @@ void main() {
       expect(choices.map((e) => e.label).toSet(), hasLength(4));
     });
 
-    test('a stored name parses back, and a bar only on a barbell above 0', () {
-      for (final e in Equipment.choices(barGrams: 15000)) {
-        expect(Equipment.named(e.name, barGrams: e is Barbell ? e.barGrams : null), e);
+    test('a stored name parses back, a bar only on a barbell and a handle only on a dumbbell, each above 0', () {
+      for (final e in [...Equipment.choices(barGrams: 15000), ...Equipment.choices(barGrams: 15000, handleGrams: 2500)]) {
+        expect(Equipment.named(e.name, barGrams: e is Barbell ? e.barGrams : null, handleGrams: e is Dumbbell ? e.handleGrams : null), e);
       }
+      expect(Equipment.named('oneDumbbell', handleGrams: 2500), const OneDumbbell(handleGrams: 2500));
       expect(() => Equipment.named('kettlebell'), throwsFormatException);
       expect(() => Equipment.named('barbell'), throwsFormatException);
       expect(() => Equipment.named('barbell', barGrams: 0), throwsFormatException);
       expect(() => Equipment.named('dumbbellPair', barGrams: 20000), throwsFormatException);
+      expect(() => Equipment.named('dumbbellPair', handleGrams: 0), throwsFormatException);
+      expect(() => Equipment.named('barbell', barGrams: 20000, handleGrams: 2500), throwsFormatException);
+      expect(() => Equipment.named('none', handleGrams: 2500), throwsFormatException);
     });
 
     test('a kind without a weight has no equipment, whatever was set', () {
@@ -832,7 +968,7 @@ void main() {
       expect(plank, const Exercise(id: ExerciseId(9), name: 'Plank', kind: ExerciseKind.time, equipment: Equipment.none));
     });
 
-    test('an edit of only the equipment or the bar refreshes the slot, and the same equipment changes nothing', () {
+    test('an edit of only the equipment, the bar or the handle refreshes the slot, and the same equipment changes nothing', () {
       final s = open([Slot(squat, [kg(100, 5)])]);
       const pair = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps, equipment: Equipment.dumbbellPair);
       expect(reduce(s, const UpdateExercise(pair)).workout.slots.single.exercise.equipment, Equipment.dumbbellPair);
@@ -841,6 +977,8 @@ void main() {
       const lighter = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps, equipment: Barbell(15000));
       expect(reduce(loaded, const UpdateExercise(lighter)).workout.slots.single.exercise.equipment, const Barbell(15000));
       expect(identical(reduce(loaded, const UpdateExercise(barbell)), loaded), isTrue);
+      const adjustable = Exercise(id: ExerciseId(1), name: 'Squat', kind: ExerciseKind.weightReps, equipment: DumbbellPair(handleGrams: 2500));
+      expect(reduce(reduce(s, const UpdateExercise(pair)), const UpdateExercise(adjustable)).workout.slots.single.exercise.equipment, const DumbbellPair(handleGrams: 2500));
     });
   });
 }

@@ -169,21 +169,22 @@ final class SetEntry {
   int get hashCode => Object.hash(grams, reps, metres, seconds, warmup, note, status);
 }
 
-/// What the logged weight is lifted with. The logged weight is always the total load, so equipment never changes a set, e1RM, volume, the cascade or the step; it only explains how the total splits, for the marker and the panel's breakdown line. A bar weight exists only on [Barbell], so a bar on a dumbbell exercise cannot be built.
+/// What the logged weight is lifted with. The logged weight is always the total load, so equipment never changes a set, e1RM, volume, the cascade or the step; it only explains how the total splits, for the marker and the panel's breakdown line. A bar weight exists only on [Barbell] and a handle weight only on a [Dumbbell], so neither can be built on the wrong equipment.
 sealed class Equipment {
   const Equipment();
 
   static const none = NoEquipment._();
-  static const dumbbellPair = DumbbellPair._();
-  static const oneDumbbell = OneDumbbell._();
+  static const dumbbellPair = DumbbellPair();
+  static const oneDumbbell = OneDumbbell();
 
   /// Every equipment value in the dialog's order.
-  static List<Equipment> choices({required int barGrams}) => [none, Barbell(barGrams), dumbbellPair, oneDumbbell];
+  static List<Equipment> choices({required int barGrams, int? handleGrams}) => [none, Barbell(barGrams), DumbbellPair(handleGrams: handleGrams), OneDumbbell(handleGrams: handleGrams)];
 
-  /// Parses a stored [name] back. Throws [FormatException] unless [barGrams] is given exactly for a barbell and is above 0.
-  factory Equipment.named(String name, {int? barGrams}) {
-    final match = barGrams != null && barGrams <= 0 ? null : choices(barGrams: barGrams ?? Barbell.standardBarGrams).where((e) => e.name == name).firstOrNull;
-    if (match == null || (match is Barbell) != (barGrams != null)) throw FormatException('not a stored equipment', '$name/$barGrams');
+  /// Parses a stored [name] back. Throws [FormatException] unless [barGrams] is given exactly for a barbell, [handleGrams] at most for a dumbbell, and each is above 0.
+  factory Equipment.named(String name, {int? barGrams, int? handleGrams}) {
+    final valid = (barGrams == null || barGrams > 0) && (handleGrams == null || handleGrams > 0);
+    final match = !valid ? null : choices(barGrams: barGrams ?? Barbell.standardBarGrams, handleGrams: handleGrams).where((e) => e.name == name).firstOrNull;
+    if (match == null || (match is Barbell) != (barGrams != null) || (handleGrams != null && match is! Dumbbell)) throw FormatException('not a stored equipment', '$name/$barGrams/$handleGrams');
     return match;
   }
 
@@ -240,9 +241,60 @@ final class Barbell extends Equipment {
   int get hashCode => barGrams.hashCode;
 }
 
+/// The panel's line under the weight of an adjustable dumbbell once the lifter has counted their plates: [each] as on a fixed dumbbell, then [plates] for each end, heaviest first, or null when the lifter's plates can't make it.
+typedef Loading = ({String? each, List<int>? plates});
+
+/// Fixed dumbbells, or adjustable ones whose empty handle weighs [handleGrams], per exercise, because a home set and a gym's differ.
+sealed class Dumbbell extends Equipment {
+  const Dumbbell({this.handleGrams}) : assert(handleGrams == null || handleGrams > 0);
+
+  final int? handleGrams;
+
+  /// How many ends carry the same plates: two on one dumbbell, four on a pair.
+  int get _ends;
+
+  /// The grams of one dumbbell for the logged total [grams].
+  int _oneOf(int grams);
+
+  /// What one dumbbell weighs, worded for the panel, such as `6.5 kg each` for a pair. Null for one dumbbell, whose total is its own weight.
+  String? _each(int grams);
+
+  /// What goes on each end for the logged total [grams], from the lifter's [plates]: the fewest plates that make it, and among equally few the heavier. Null without a handle or plates, at or below the handle and for a total of 0 or less, where [breakdown] says it all.
+  Loading? loading(int grams, Plates plates) {
+    final handle = handleGrams;
+    if (handle == null || plates.isEmpty || grams <= 0) return null;
+    final loaded = _oneOf(grams) - handle;
+    if (loaded <= 0) return null;
+    return (each: _each(grams), plates: loaded.isOdd ? null : plates.forEachEnd(loaded ~/ 2, ends: _ends));
+  }
+
+  @override
+  bool operator ==(Object other) => other.runtimeType == runtimeType && other is Dumbbell && other.handleGrams == handleGrams;
+
+  @override
+  int get hashCode => Object.hash(runtimeType, handleGrams);
+}
+
+/// The line for one dumbbell of [grams] on a [handle]: [loaded] words its plates and the handle, and [handles] names the handle the way the line says it, one or two.
+String _onHandle(int grams, int handle, String handles, String Function(String plates, String handle) loaded) {
+  final h = Field.weight.format(handle);
+  if (grams == handle) return 'just the $h kg $handles';
+  if (grams < handle) return 'less than the $h kg $handles';
+  return loaded(Field.weight.format(grams - handle), h);
+}
+
 /// Two dumbbells of the same weight, logged as their sum: hammer curls at 12 kg are two 6 kg dumbbells.
-final class DumbbellPair extends Equipment {
-  const DumbbellPair._();
+final class DumbbellPair extends Dumbbell {
+  const DumbbellPair({super.handleGrams});
+
+  @override
+  int get _ends => 4;
+
+  @override
+  int _oneOf(int grams) => _half(grams);
+
+  @override
+  String _each(int grams) => '${Field.weight.format(_half(grams))} kg each';
 
   @override
   String get name => 'dumbbellPair';
@@ -251,12 +303,25 @@ final class DumbbellPair extends Equipment {
   String get label => 'Two dumbbells';
 
   @override
-  String breakdown(int grams) => grams <= 0 ? '' : '${Field.weight.format(_half(grams))} kg each';
+  String breakdown(int grams) {
+    if (grams <= 0) return '';
+    final handle = handleGrams;
+    return handle == null ? _each(grams) : _onHandle(_half(grams), handle, 'handles', (plates, h) => '${_each(grams)} ($plates + $h kg)');
+  }
 }
 
 /// One dumbbell, logged as its own weight.
-final class OneDumbbell extends Equipment {
-  const OneDumbbell._();
+final class OneDumbbell extends Dumbbell {
+  const OneDumbbell({super.handleGrams});
+
+  @override
+  int get _ends => 2;
+
+  @override
+  int _oneOf(int grams) => grams;
+
+  @override
+  String? _each(int grams) => null;
 
   @override
   String get name => 'oneDumbbell';
@@ -265,10 +330,78 @@ final class OneDumbbell extends Equipment {
   String get label => 'One dumbbell';
 
   @override
-  String? breakdown(int grams) => null;
+  String? breakdown(int grams) {
+    final handle = handleGrams;
+    if (handle == null) return null;
+    if (grams <= 0) return '';
+    return _onHandle(grams, handle, 'handle', (plates, h) => '$plates kg + $h kg handle');
+  }
 }
 
 int _half(int grams) => grams ~/ 2;
+
+/// The plates the lifter owns: how many pieces of each weight in grams, so a pair of 1.25 kg plates is 1250 with 2.
+final class Plates {
+  /// Drops the weights with no pieces. Throws [ArgumentError] for a weight of 0 or less or a negative count.
+  factory Plates(Map<int, int> pieces) {
+    if (pieces.entries.any((e) => e.key <= 0 || e.value < 0)) throw ArgumentError.value(pieces, 'pieces', 'needs weights above 0 and counts of 0 or more');
+    final owned = pieces.entries.where((e) => e.value > 0).toList()..sort((a, b) => b.key.compareTo(a.key));
+    return Plates._(Map.unmodifiable(Map.fromEntries(owned)));
+  }
+
+  const Plates._(this.pieces);
+
+  static const none = Plates._({});
+
+  /// Heaviest first. Every count is above 0.
+  final Map<int, int> pieces;
+
+  bool get isEmpty => pieces.isEmpty;
+
+  /// The fewest plates that make [grams] on one end, heaviest first, when [ends] ends must all carry the same plates, so each end gets at most a [ends]th of the pieces of a weight. Among equally few, the one with more heavy plates wins. Empty for 0 grams, and null when the plates owned cannot make [grams].
+  List<int>? forEachEnd(int grams, {required int ends}) {
+    if (grams < 0) return null;
+    final usable = [for (final MapEntry(key: weight, value: count) in pieces.entries) if (count ~/ ends > 0) (weight: weight, count: count ~/ ends)];
+    final unit = usable.fold(grams, (g, p) => g.gcd(p.weight));
+    if (unit == 0) return const [];
+    if (grams % unit != 0 || usable.fold(0, (sum, p) => sum + p.weight * p.count) < grams) return null;
+    final target = grams ~/ unit;
+    const impossible = 1 << 30;
+    // fewest[i][s]: the fewest plates that make s units from usable[i] onwards.
+    final fewest = List.generate(usable.length + 1, (i) => List.filled(target + 1, impossible));
+    fewest[usable.length][0] = 0;
+    for (var i = usable.length - 1; i >= 0; i--) {
+      final (:weight, :count) = usable[i];
+      final w = weight ~/ unit;
+      for (var s = 0; s <= target; s++) {
+        for (var k = 0; k <= count && k * w <= s; k++) {
+          final rest = fewest[i + 1][s - k * w];
+          if (rest + k < fewest[i][s]) fewest[i][s] = rest + k;
+        }
+      }
+    }
+    if (fewest[0][target] == impossible) return null;
+    final chosen = <int>[];
+    var s = target;
+    for (final (i, (:weight, :count)) in usable.indexed) {
+      final w = weight ~/ unit;
+      for (var k = count < s ~/ w ? count : s ~/ w; k >= 0; k--) {
+        if (fewest[i + 1][s - k * w] + k == fewest[i][s]) {
+          chosen.addAll(List.filled(k, weight));
+          s -= k * w;
+          break;
+        }
+      }
+    }
+    return chosen;
+  }
+
+  @override
+  bool operator ==(Object other) => other is Plates && other.pieces.length == pieces.length && pieces.entries.every((e) => other.pieces[e.key] == e.value);
+
+  @override
+  int get hashCode => Object.hashAll([for (final e in pieces.entries) Object.hash(e.key, e.value)]);
+}
 
 /// An exercise as a day sees it. A [Slot] holds a copy; the exercise table in the store owns the original, and [UpdateExercise] refreshes the copy after an edit.
 final class Exercise {

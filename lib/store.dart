@@ -81,6 +81,17 @@ final class Store {
     return [for (final row in rows) _exercise(row)];
   }
 
+  /// The plates the lifter owns, [Plates.none] until they are entered.
+  Plates loadPlates() => Plates({for (final row in _sql('SELECT weight_g, pieces FROM plate').select()) row['weight_g'] as int: row['pieces'] as int});
+
+  /// Replaces the plates the lifter owns with [plates].
+  void savePlates(Plates plates) => _inTransaction(_db, () {
+    _sql('DELETE FROM plate').execute();
+    for (final MapEntry(key: grams, value: pieces) in plates.pieces.entries) {
+      _sql('INSERT INTO plate (weight_g, pieces) VALUES (?, ?)').execute([grams, pieces]);
+    }
+  });
+
   ExerciseDefaults loadDefaults() {
     final values = {for (final row in _sql('SELECT key, value FROM setting').select()) row['key'] as String: row['value']};
     return (
@@ -102,15 +113,15 @@ final class Store {
     final defaults = loadDefaults();
     final step = weightStepGrams ?? defaults.weightStepGrams;
     final restTime = rest ?? defaults.rest;
-    final (equipmentName, barGrams) = _equipmentColumns(equipment);
-    final id = _writeExercise(name, () => _sql('INSERT INTO exercise (name, kind, category, weight_step_g, rest_s, equipment, bar_g) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id').select([name, kind.name, category, step, restTime.inSeconds, equipmentName, barGrams]).single['id'] as int);
+    final (equipmentName, barGrams, handleGrams) = _equipmentColumns(equipment);
+    final id = _writeExercise(name, () => _sql('INSERT INTO exercise (name, kind, category, weight_step_g, rest_s, equipment, bar_g, handle_g) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id').select([name, kind.name, category, step, restTime.inSeconds, equipmentName, barGrams, handleGrams]).single['id'] as int);
     return Exercise(id: ExerciseId(id), name: name, kind: kind, equipment: equipment, category: category, weightStepGrams: step, rest: restTime);
   }
 
   /// Saves name, kind, category, increment, rest and equipment for [exercise.id]. Throws [DuplicateExerciseName] like [createExercise]. Dispatch [UpdateExercise] afterwards so the open day shows the change.
   void updateExercise(Exercise exercise) {
-    final (equipmentName, barGrams) = _equipmentColumns(exercise.equipment);
-    _writeExercise(exercise.name, () => _sql('UPDATE exercise SET name = ?, kind = ?, category = ?, weight_step_g = ?, rest_s = ?, equipment = ?, bar_g = ? WHERE id = ?').execute([exercise.name, exercise.kind.name, exercise.category, exercise.weightStepGrams, exercise.rest.inSeconds, equipmentName, barGrams, exercise.id.value]));
+    final (equipmentName, barGrams, handleGrams) = _equipmentColumns(exercise.equipment);
+    _writeExercise(exercise.name, () => _sql('UPDATE exercise SET name = ?, kind = ?, category = ?, weight_step_g = ?, rest_s = ?, equipment = ?, bar_g = ?, handle_g = ? WHERE id = ?').execute([exercise.name, exercise.kind.name, exercise.category, exercise.weightStepGrams, exercise.rest.inSeconds, equipmentName, barGrams, handleGrams, exercise.id.value]));
   }
 
   T _writeExercise<T>(String name, T Function() write) {
@@ -274,7 +285,7 @@ const _setlistTables = {'exercise', 'workout', 'workout_slot', 'workout_set', 'a
 const _weightStepKey = 'default_weight_step_g';
 const _restKey = 'default_rest_s';
 
-const _exerciseColumns = 'e.id, e.name, e.kind, e.category, e.weight_step_g, e.rest_s, e.equipment, e.bar_g';
+const _exerciseColumns = 'e.id, e.name, e.kind, e.category, e.weight_step_g, e.rest_s, e.equipment, e.bar_g, e.handle_g';
 const _setColumns = 's.weight_g, s.reps, s.metres, s.seconds, s.warmup, s.done, s.logged_at, s.note AS set_note';
 
 const _selectDays = 'SELECT w.day, w.note AS day_note, sl.joined, $_exerciseColumns, $_setColumns FROM workout w LEFT JOIN workout_slot sl ON sl.day = w.day LEFT JOIN exercise e ON e.id = sl.exercise_id LEFT JOIN workout_set s ON s.day = sl.day AND s.exercise_id = sl.exercise_id';
@@ -302,11 +313,12 @@ List<Entry> _entries(Iterable<(Exercise, bool, List<SetEntry>)> slots) {
   return [for (final group in groups) group.length == 1 ? group.single : Superset(group)];
 }
 
-Exercise _exercise(Row row) => Exercise(id: ExerciseId(row['id'] as int), name: row['name'] as String, kind: ExerciseKind.values.byName(row['kind'] as String), equipment: Equipment.named(row['equipment'] as String, barGrams: row['bar_g'] as int?), category: row['category'] as String?, weightStepGrams: row['weight_step_g'] as int, rest: Duration(seconds: row['rest_s'] as int));
+Exercise _exercise(Row row) => Exercise(id: ExerciseId(row['id'] as int), name: row['name'] as String, kind: ExerciseKind.values.byName(row['kind'] as String), equipment: Equipment.named(row['equipment'] as String, barGrams: row['bar_g'] as int?, handleGrams: row['handle_g'] as int?), category: row['category'] as String?, weightStepGrams: row['weight_step_g'] as int, rest: Duration(seconds: row['rest_s'] as int));
 
-(String, int?) _equipmentColumns(Equipment equipment) => switch (equipment) {
-  Barbell(:final barGrams) => (equipment.name, barGrams),
-  NoEquipment() || DumbbellPair() || OneDumbbell() => (equipment.name, null),
+(String, int?, int?) _equipmentColumns(Equipment equipment) => switch (equipment) {
+  Barbell(:final barGrams) => (equipment.name, barGrams, null),
+  Dumbbell(:final handleGrams) => (equipment.name, null, handleGrams),
+  NoEquipment() => (equipment.name, null, null),
 };
 
 SetEntry _set(Row row) {
@@ -340,7 +352,7 @@ void _configure(Database db) => db.execute('PRAGMA foreign_keys = ON; PRAGMA jou
 /// Append-only. Entry i moves the schema from user_version i to i + 1. A shipped entry is never edited; a change is a new entry. docs/schema.sql is generated from a database these build, and test/store_test.dart fails when the two differ.
 ///
 /// Comments that document the schema sit inside each statement, because SQLite keeps a statement's text in sqlite_master and drops anything between statements.
-const List<String> _migrations = [_v1, _v2, _v3];
+const List<String> _migrations = [_v1, _v2, _v3, _v4];
 
 const String _v1 = r'''
 CREATE TABLE exercise (
@@ -464,6 +476,42 @@ CREATE TABLE exercise (
 INSERT INTO exercise (id, name, kind, category, weight_step_g, rest_s, import_key) SELECT id, name, kind, category, weight_step_g, rest_s, import_key FROM exercise_v2;
 
 DROP TABLE exercise_v2;
+''';
+
+/// Adds `exercise.handle_g` by building the table again, for the reasons [_v2] gives, and the `plate` table.
+const String _v4 = r'''
+CREATE TEMP TABLE exercise_v3 AS SELECT id, name, kind, category, weight_step_g, rest_s, import_key, equipment, bar_g FROM exercise;
+
+DROP TABLE exercise;
+
+CREATE TABLE exercise (
+  id            INTEGER PRIMARY KEY,
+  name          TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+  -- ExerciseKind.name in lib/day.dart. No CHECK, so a new kind needs no table rebuild; the store parses this column and rejects unknown values.
+  kind          TEXT    NOT NULL,
+  category      TEXT,
+  -- No defaults here: the store always writes them, from the caller or from the setting table.
+  weight_step_g INTEGER NOT NULL CHECK (weight_step_g > 0),
+  rest_s        INTEGER NOT NULL CHECK (rest_s >= 0),
+  -- Stable id in an import source, such as 'fitnotes:42'. NULL for exercises created in the app. Lets a second import find the same exercise after a rename.
+  import_key    TEXT    UNIQUE,
+  -- Equipment.name in lib/day.dart: what the logged total is lifted with, for the marker and the panel's breakdown. No CHECK on the names, like kind. The default is what an import writes, because no source tells the equipment.
+  equipment     TEXT    NOT NULL DEFAULT 'none',
+  -- Grams of the bar, set exactly when equipment is 'barbell'. Per exercise, because an EZ bar is lighter than a squat bar.
+  bar_g         INTEGER CHECK (bar_g > 0) CHECK ((bar_g IS NOT NULL) = (equipment = 'barbell')),
+  -- Grams of an adjustable dumbbell's empty handle, which the plates go on. Only for 'dumbbellPair' and 'oneDumbbell', and NULL for fixed dumbbells. Per exercise, because a home set and a gym's differ.
+  handle_g      INTEGER CHECK (handle_g > 0) CHECK (handle_g IS NULL OR equipment IN ('dumbbellPair', 'oneDumbbell'))
+) STRICT;
+
+INSERT INTO exercise (id, name, kind, category, weight_step_g, rest_s, import_key, equipment, bar_g) SELECT id, name, kind, category, weight_step_g, rest_s, import_key, equipment, bar_g FROM exercise_v3;
+
+DROP TABLE exercise_v3;
+
+CREATE TABLE plate (
+  -- The plates the lifter owns, for the panel's line of which plates go on each end of an adjustable dumbbell. A weight not owned has no row. The import never writes it.
+  weight_g INTEGER PRIMARY KEY CHECK (weight_g > 0),
+  pieces   INTEGER NOT NULL CHECK (pieces > 0)
+) STRICT, WITHOUT ROWID;
 ''';
 
 /// Brings [db] to `_migrations.length`. Each step is one transaction that includes the user_version bump, and user_version lives in the database header, so it rolls back with the step. A crash mid-migration therefore leaves the old version, and the next launch reruns that step from the start.

@@ -122,16 +122,23 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
       _ => Barbell.standardBarGrams,
     }),
   );
+  late final _handle = TextEditingController(
+    text: switch (widget.initial.equipment) {
+      Dumbbell(handleGrams: final handle?) => Field.weight.format(handle),
+      _ => '',
+    },
+  );
   late ExerciseKind _kind = widget.initial.kind;
   late Equipment _equipment = widget.initial.equipment;
   String? _nameError;
   String? _stepError;
   String? _barError;
+  String? _handleError;
   String? _restError;
 
   @override
   void dispose() {
-    for (final c in [_name, _category, _step, _bar, _rest]) {
+    for (final c in [_name, _category, _step, _bar, _handle, _rest]) {
       c.dispose();
     }
     super.dispose();
@@ -142,20 +149,25 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
     final hasWeight = _kind.fields.contains(Field.weight);
     final step = hasWeight ? Field.weight.parse(_step.text) : widget.initial.weightStepGrams;
     final bar = Field.weight.parse(_bar.text);
+    final handleText = _handle.text.trim();
+    final handle = handleText.isEmpty ? null : Field.weight.parse(handleText);
     final rest = Field.time.parse(_rest.text);
     setState(() {
       _nameError = name.isEmpty ? 'Give it a name' : null;
       _stepError = step == null || step <= 0 ? 'Type a step above 0, such as 2.5' : null;
       _barError = hasWeight && _equipment is Barbell && (bar == null || bar <= 0) ? 'Type a bar weight above 0, such as 20' : null;
+      _handleError = hasWeight && _equipment is Dumbbell && handleText.isNotEmpty && (handle == null || handle <= 0) ? 'Type a handle weight above 0, or leave it empty' : null;
       _restError = rest == null ? 'Type m:ss such as 2:00' : null;
     });
-    if (_nameError != null || _stepError != null || _barError != null || _restError != null) return;
+    if (_nameError != null || _stepError != null || _barError != null || _handleError != null || _restError != null) return;
     final category = _category.text.trim();
     final equipment = !hasWeight
         ? Equipment.none
         : switch (_equipment) {
             Barbell() => Barbell(bar!),
-            final other => other,
+            DumbbellPair() => DumbbellPair(handleGrams: handle),
+            OneDumbbell() => OneDumbbell(handleGrams: handle),
+            NoEquipment() => Equipment.none,
           };
     try {
       final saved = widget.save((name: name, kind: _kind, category: category.isEmpty ? null : category, weightStepGrams: step!, rest: Duration(seconds: rest!), equipment: equipment));
@@ -198,6 +210,10 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
                     Barbell(:final barGrams) => barGrams,
                     _ => Barbell.standardBarGrams,
                   },
+                  handleGrams: switch (_equipment) {
+                    Dumbbell(:final handleGrams) => handleGrams,
+                    _ => null,
+                  },
                 ))
                   DropdownMenuItem(
                     value: e,
@@ -214,6 +230,10 @@ class _ExerciseDialogState extends State<_ExerciseDialog> {
             if (_equipment is Barbell) ...[
               const SizedBox(height: 12),
               TextField(controller: _bar, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'Bar weight', suffixText: 'kg', errorText: _barError)),
+            ],
+            if (_equipment is Dumbbell) ...[
+              const SizedBox(height: 12),
+              TextField(controller: _handle, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: 'Handle weight (optional)', helperText: 'For adjustable dumbbells', suffixText: 'kg', errorText: _handleError)),
             ],
           ],
           const SizedBox(height: 12),
